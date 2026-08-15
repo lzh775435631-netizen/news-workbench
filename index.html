@@ -213,6 +213,7 @@ button{font-family:inherit;cursor:pointer}
       <div>🤖 AI 處理：分類 · 摘要 · 關鍵字 · 重要度 · 熱點 · 事件聚合</div>
       <div style="margin-top:6px"><span class="tag">國內</span><span class="tag">國際</span><span class="tag">財經</span><span class="tag">科技</span><span class="tag">AI</span><span class="tag">軍事</span><span class="tag">體育</span>…</div>
       <div style="margin-top:6px"><button class="btn small" onclick="openAddFeed()">＋ 新增自訂來源</button></div>
+      <div style="margin-top:6px"><button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="openSettings()">⚙ AI 引擎設定</button></div>
     </div>
   </aside>
 
@@ -339,6 +340,14 @@ button{font-family:inherit;cursor:pointer}
   <button class="close" onclick="closeModal('mSearch')">✕ 關閉</button>
   <h2>🔎 全站搜尋</h2>
   <div id="searchBody"></div>
+</div></div>
+
+<!-- AI 引擎設定 -->
+<div class="modal" id="mSettings"><div class="sheet" style="max-width:560px">
+  <button class="close" onclick="closeModal('mSettings')">✕ 關閉</button>
+  <h2>⚙ AI 研究引擎</h2>
+  <div class="tip">真實大模型研究引擎狀態（寫作價值評分 / 論點生成 / 證據識別）</div>
+  <div id="setBody"></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
@@ -640,7 +649,8 @@ function renderBoard(b){
     <div class="k"><b>${b.counts.argument}</b><span>論點</span></div>
     <div class="k"><b>${b.counts.topic}</b><span>選題</span></div>
   </div>`;
-  h+=`<div class="rb-head"><h3>🔬 今日值得研究</h3><div class="sub">綜合熱度/重要度/突發/寫作價值，已研究者不重複推薦</div></div>`;
+  const aiTag = b.ai_enabled ? `<span class="chip" style="background:#e7f6ec;color:var(--green)">🟢 AI 已連接</span>` : `<span class="chip" style="background:#eef2fb;color:var(--muted)">⚪ AI 未配置</span>`;
+  h+=`<div class="rb-head"><h3>🔬 今日值得研究 ${aiTag}</h3><div class="sub">綜合熱度/重要度/突發/寫作價值，已研究者不重複推薦</div></div>`;
   if(!b.today_worthy.length) h+=`<div class="empty"><div class="big">🗞️</div>暫無候選新聞</div>`;
   for(const n of b.today_worthy){
     h+=`<div class="research-card">
@@ -693,14 +703,18 @@ async function openResearchDetail(id){
 }
 function renderResearchDetail(d){
   const r=d.research; curRid=r.id;
+  let aiBadge = (r.ai_generated==1) ? `<span class="chip" style="background:#e7f6ec;color:var(--green)">🤖 AI 已分析</span>` : `<span class="chip" style="background:#fff3e0;color:var(--amber)">🧩 啟發式</span>`;
   let h=`<div class="ctop" style="margin-bottom:6px">
     <span class="chip" style="background:#eaf1ff;color:var(--blue2)">${esc(r.status)}</span>
     <span class="ws">🔥 寫作價值 ${r.writing_score}</span>
+    ${aiBadge}
+    <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted);margin-left:auto" onclick="reAnalyze(${r.id})">🔄 重新分析</button>
     <select id="rdStatus" onchange="updateResearchStatus(${r.id},this.value)" style="padding:4px 8px;border-radius:8px;border:1px solid var(--line)">
       ${["待研究","研究中","待补证据","待验证","已完成","已转文章"].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join("")}
     </select>
   </div>`;
   h+=`<h2 style="margin:4px 0 2px">${esc(r.title)}</h2>`;
+  if(r.ai_generated==1) h+=`<div class="tip">🤖 已由 AI 分析（${esc(r.ai_model||'')} · ${esc(r.ai_generated_at||'')}）· 寫作價值 ${r.writing_score}</div>`;
   h+=`<div class="tip">寫作價值說明：${esc(r.writing_reason||"")}</div>`;
   h+=sec("📌 發生了什麼？", esc(r.event||"無"));
   h+=sec("💡 為什麼值得關注？", esc(r.why_matters||"無"));
@@ -709,7 +723,7 @@ function renderResearchDetail(d){
   h+=`<div class="rb-head"><h3>🧩 核心論點（${d.arguments.length}）</h3><button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="addArgument(${r.id})">＋ 新增論點</button></div>`;
   for(const a of d.arguments){
     h+=`<div class="arg-card">
-      <div class="ac-top"><div class="content">${esc(a.content)}</div><div>${strengthPill(a.strength)} ${credPill(a.credibility)}</div></div>
+      <div class="ac-top"><div class="content">${esc(a.content)}</div><div>${strengthPill(a.strength)} ${credPill(a.credibility)} ${basisPill(a.basis)}</div></div>
       <div class="exp">${esc(a.explanation||"")}</div>
       <div class="mini"><b>支持證據：</b></div>
       ${(a.evidence&&a.evidence.length)?a.evidence.map(evItem).join(""):`<div class="tip">尚無證據，請補充並自行核實 ⚠️</div>`}
@@ -738,12 +752,56 @@ function renderResearchDetail(d){
       <div style="margin-top:6px"><button class="btn small" onclick="openTopicLib()">📚 查看選題庫</button></div>
     </div>`;
   }
+  // 已有相關素材
+  if(d.related_news && d.related_news.length){
+    h+=`<div class="rb-head"><h3>🔗 已有相關素材（${d.related_news.length}）</h3><div class="sub">資料庫中按關鍵詞檢索到的相關新聞，可作為證據補強</div></div>`;
+    for(const rn of d.related_news){
+      h+=`<div class="research-card" style="cursor:default">
+        <div class="ctop"><span class="chip cat">${esc(rn.source)}</span><span class="chip" style="background:#f0f3f9;color:#46536e">${esc(rn.published_iso||"")}</span></div>
+        <h4><a href="${esc(rn.link)}" target="_blank">${esc(rn.title)}</a></h4>
+        <div class="why">${esc((rn.summary||"").slice(0,120))}</div>
+        <div style="margin-top:6px"><button class="btn small" onclick="addEvidenceFromNews(${r.id},${rn.id})">＋ 加入證據</button></div>
+      </div>`;
+    }
+  }
   $("#rdBody").innerHTML=h;
 }
 function evItem(ev){
   const v = ev.verified? `<span class="pill cred-hi">已驗證</span>` : `<span class="ev-unverified">⚠️ 待驗證</span>`;
   const link = ev.source_url?` · <a href="${esc(ev.source_url)}" target="_blank">連結</a>`:"";
   return `<div class="ev-item"><div class="et">[${esc(ev.type)}] ${esc(ev.title)} ${v}</div><div>${esc(ev.content||"")}</div><div class="mini">來源：${esc(ev.source||"")}${link}</div></div>`;
+}
+function basisPill(b){
+  const m={"事实":"cred-hi","事實":"cred-hi","推论":"cred-mid","推論":"cred-mid","观点":"cred-w","觀點":"cred-w","待驗證":"cred-lo","待验证":"cred-lo"};
+  return `<span class="pill ${m[b]||'cred-mid'}">${b||'推论'}</span>`;
+}
+async function reAnalyze(rid){
+  toast("AI 重新分析中…");
+  const r = await postj("/api/research/ai", {research_id: rid, force: true});
+  if(r.error){toast("失敗："+r.error);return;}
+  toast(r.cached?"已讀取快取":(r.from_llm?"🤖 AI 重新分析完成":"已更新（啟發式）"));
+  openResearchDetail(rid);
+}
+async function addEvidenceFromNews(rid, nid){
+  const r = await postj("/api/research/related-evidence", {research_id: rid, news_id: nid});
+  if(r.error){toast("失敗："+r.error);return;}
+  toast("已加入證據（來自相關素材）");
+  openResearchDetail(rid);
+}
+async function openSettings(){ await loadSettings(); openModal("mSettings"); }
+async function loadSettings(){
+  const s = await getj("/api/llm/status");
+  const dot = s.enabled ? "🟢 已連接" : "⚪ 未配置";
+  const mode = s.mode==="responses" ? "OpenAI Responses API" : "OpenAI Chat Completions";
+  $("#setBody").innerHTML = `
+    <div class="kpi" style="margin:12px 0">
+      <div class="k"><b style="color:${s.enabled?'var(--green)':'var(--muted)'}">${dot}</b><span>連接狀態</span></div>
+    </div>
+    <div class="brief-item"><div class="t">模型</div><div class="m">${esc(s.model)}</div></div>
+    <div class="brief-item"><div class="t">API 模式</div><div class="m">${mode}</div></div>
+    <div class="brief-item"><div class="t">API 位址</div><div class="m">${esc(s.base_url)}</div></div>
+    <div class="tip" style="margin-top:12px">🔒 API Key 僅存放在 Render 後端環境變數中，本頁面不顯示、不可輸入。請於 Render 控制台設定 <b>LLM_API_KEY</b> / <b>LLM_BASE_URL</b> / <b>LLM_MODEL</b> 後重啟服務即可啟用。</div>
+  `;
 }
 async function saveMyView(id){ await postj("/api/research/update",{id, my_view:$("#rdMyView").value}); toast("已儲存觀點"); }
 async function updateResearchStatus(id,st){ await postj("/api/research/status",{id,status:st}); toast("狀態：「"+st+"」"); }

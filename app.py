@@ -20,9 +20,13 @@ FEEDS = os.path.join(BASE, "feeds.json")
 PORT = int(os.environ.get("PORT", "8800"))
 
 # 可選 LLM（OpenAI 相容）— 設定環境變數即啟用，未設定則使用啟發式 AI
+# 統一支援 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL；模型不寫死，可用環境變數切換
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-LLM_BASE = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
+LLM_BASE = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+# API 模式：chat = /chat/completions（預設，相容大多數 OpenAI-compatible 端點）
+#          responses = OpenAI Responses API（/responses）
+LLM_API_MODE = os.environ.get("LLM_API_MODE", "chat").lower()
 
 WRITE_LOCK = threading.Lock()
 last_sync = 0
@@ -213,7 +217,29 @@ def init_db():
       PRIMARY KEY(topic_id, argument_id)
     );
     """)
+    _migrate_columns(c)
     c.commit(); c.close()
+
+def _column_exists(c, table, col):
+    try:
+        cols = [r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()]
+        return col in cols
+    except Exception:
+        return False
+
+def _migrate_columns(c):
+    """向後相容遷移：為已存在表格補充新欄位（研究緩存 / 論點依據類型）。"""
+    for table, col, ddl in (
+        ("researches", "ai_generated", "INTEGER DEFAULT 0"),
+        ("researches", "ai_model", "TEXT DEFAULT ''"),
+        ("researches", "ai_generated_at", "TEXT DEFAULT ''"),
+        ("arguments", "basis", "TEXT DEFAULT '推论'"),
+    ):
+        if not _column_exists(c, table, col):
+            try:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+            except Exception as e:
+                print(f"[migrate skip {table}.{col}] {e}")
 
 # ----------------------------------------------------------------------------
 # 擷取
@@ -408,20 +434,88 @@ def process_cycle():
     print(f"[cycle] +{last_cycle_new} new, clusters={len(groups)}, breaking={len(last_cycle_breaking)}, {time.time()-t0:.1f}s")
 
 # ----------------------------------------------------------------------------
-# 可選 LLM
+# 可選 LLM（OpenAI Chat Completions / Responses API 雙模式）
 # ----------------------------------------------------------------------------
-def call_llm(system, prompt, max_tokens=600):
+def _extract_responses_text(data):
+    """從 OpenAI Responses API 回傳結構中提取文字內容。"""
+    try:
+        out = data.get("output") or []
+        texts = []
+        for item in out:
+            if item.get("type") == "message" and "content" in item:
+                for c in item["content"]:
+                    if c.get("type") == "output_text":
+                        texts.append(c.get("text", ""))
+            # 部分實作把文字放在 output_text 直接欄位
+            if "text" in item and isinstance(item["text"], str):
+                texts.append(item["text"])
+        # 相容 output[*].content 為純字串陣列
+        if not texts and "output" in data:
+            for item in data["output"]:
+                if isinstance(item, dict) and "content" in item and isinstance(item["content"], list):
+                    for c in item["content"]:
+                        if isinstance(c, dict) and c.get("type") == "output_text":
+                            texts.append(c.get("text", ""))
+        return "\n".join(t for t in texts if t).strip()
+    except Exception:
+        return ""
+
+def call_llm(system, prompt, max_tokens=700, temperature=0.4, timeout=45, json_mode=False):
+    """呼叫可選 LLM。未設定 API Key 時回傳 None（呼叫方應使用啟發式兜底）。
+    支援兩種模式：
+      - chat:      POST {LLM_BASE}/chat/completions
+      - responses: POST {LLM_BASE}/responses (OpenAI Responses API)
+    任何錯誤（key 錯誤 / 網路失敗 / 模型不存在 / 逾時 / 限流）皆回傳 None，
+    由呼叫方統一走 fallback，絕不讓頁面報錯。
+    """
     if not LLM_API_KEY:
         return None
+    headers = {"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"}
     try:
-        r = requests.post(f"{LLM_BASE}/chat/completions",
-                          headers={"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"},
-                          json={"model": LLM_MODEL, "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-                                "temperature": 0.4, "max_tokens": max_tokens}, timeout=40)
-        return r.json()["choices"][0]["message"]["content"].strip()
+        if LLM_API_MODE == "responses":
+            payload = {
+                "model": LLM_MODEL,
+                "input": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": temperature,
+                "max_output_tokens": max_tokens,
+            }
+            if json_mode:
+                payload["text"] = {"format": {"type": "json_object"}}
+            r = requests.post(f"{LLM_BASE}/responses", headers=headers, json=payload, timeout=timeout)
+            r.raise_for_status()
+            text = _extract_responses_text(r.json())
+            return text or None
+        else:
+            payload = {
+                "model": LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
+            r = requests.post(f"{LLM_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"].strip() or None
     except Exception as e:
         print(f"[llm error] {e}")
         return None
+
+def llm_status_info():
+    """回傳 LLM 啟用狀態（絕不回傳真實 API Key）。"""
+    return {
+        "enabled": bool(LLM_API_KEY),
+        "model": LLM_MODEL,
+        "base_url": LLM_BASE,
+        "mode": LLM_API_MODE,
+        "key_configured": bool(LLM_API_KEY),
+    }
 
 # ----------------------------------------------------------------------------
 # API 處理
@@ -679,6 +773,12 @@ def api_status():
             "breaking_list": last_cycle_breaking, "total": (db().execute("SELECT COUNT(*) FROM news").fetchone()[0]),
             "fetch_interval": json.load(open(FEEDS, encoding="utf-8")).get("fetch_interval_minutes", 15)}
 
+def api_llm_status():
+    """回傳 LLM 啟用狀態。絕不包含真實 API Key。"""
+    info = llm_status_info()
+    info["fallback"] = not info["enabled"]
+    return info
+
 def api_search_history():
     c = db()
     rows = c.execute("SELECT q, MAX(ts) FROM searches GROUP BY q ORDER BY MAX(ts) DESC LIMIT 10").fetchall()
@@ -805,29 +905,40 @@ def heuristic_research(news_list, clu):
     arguments = [
         {"content": f"表面現象：{event} 已經發生並被廣泛關注。",
          "explanation": f"根據 {src_text or '多家媒體'} 的報導，「{kwtext}」是核心事實，且已有 {size} 個來源交叉印證，真實性較高。",
-         "strength": "強", "credibility": "高"},
+         "strength": "強", "credibility": "高", "basis": "事實"},
         {"content": f"關鍵轉折：此事可能不只是單一事件，而是「{kwtext}」相關趨勢的訊號。",
          "explanation": f"從多來源報導的時間與角度分布看，背後存在結構性因素，值得懷疑其是否為更大變化的前奏。",
-         "strength": "中", "credibility": "中"},
+         "strength": "中", "credibility": "中", "basis": "推論"},
         {"content": f"風險/代價：若趨勢延續，受影響最大的可能是最缺乏話語權的群體。",
          "explanation": "重大變化往往伴隨分配效應，弱勢方的成本常被熱鬧敘事掩蓋，這是寫作時應補強的視角。",
-         "strength": "中", "credibility": "待驗證"},
+         "strength": "中", "credibility": "待驗證", "basis": "觀點"},
+        {"content": f"受益/代價分配：在「{kwtext}」中，誰是最大受益者、誰在默默承擔成本？",
+         "explanation": "多數熱點事件都存在分配效應，釐清利益歸屬能讓文章更有結構、避免只停留在情緒面。",
+         "strength": "中", "credibility": "中", "basis": "推論"},
+        {"content": f"長期趨勢：即使單一事件平息，「{kwtext}」折射的結構性張力仍會以別的形式出現。",
+         "explanation": "把一次性事件放到更長的時間軸，能提升文章的厚重感與可延展性，也更容易引出後續追蹤。",
+         "strength": "中", "credibility": "待驗證", "basis": "觀點"},
     ]
     controversies = [
         f"支持者認為「{kwtext}」是進步/必要之舉；質疑者則擔心其代價與副作用是否被低估。",
         f"專業圈與大眾解讀出現分歧：數據指向一回事，情緒與敘事卻走向另一回事。",
+        f"媒體與輿論的框架選擇：同一組事實，被強調與被忽略的部分，往往決定了公眾的判斷。",
     ]
     counterintuitive = [f"直覺上這件事會往預期方向發展，但「{kwtext}」的細節顯示，真實路徑可能恰好相反。"]
     extension = [
         f"若「{kwtext}」繼續發酵，三個月後我們會用什麼指標判斷它成功了或失敗了？",
         f"有沒有被主流敘事忽略的第三方視角？",
         f"這件事與半年前類似事件相比，本質差異在哪？",
+        f"若站在反方立場，最有力的論據會是什麼？我們該如何回應？",
+        f"這件事若發生在另一個國家/群體，敘事會有什麼不同？",
     ]
     base = writing_score_of(first, clu) if clu else 60
     topics = [
         {"title": f"「{kwtext}」的結構性成因", "core_question": f"是什麼長期因素讓「{kwtext}」成為今天的熱點？", "initial_view": "", "score": min(100, base + 6)},
         {"title": f"如果趨勢延續，半年後會怎樣？", "core_question": "這件事的慣性會把我們帶到哪裡？", "initial_view": "", "score": base},
         {"title": f"誰在這件事上立場分歧最大？", "core_question": "不同群體為什麼會得出相反結論？", "initial_view": "", "score": max(40, base - 6)},
+        {"title": f"「{kwtext}」中的受益者與承擔者", "core_question": f"利益與成本的分配是否公平？", "initial_view": "", "score": max(40, base - 10)},
+        {"title": f"當「{kwtext}」成為常態會怎樣？", "core_question": "我們的社會與制度準備好了嗎？", "initial_view": "", "score": max(40, base - 12)},
     ]
     reason = (f"這條新聞本身熱度為 {first.get('hotness',0)}，但評分更看重其背後矛盾的普遍性"
               f"（關鍵詞「{kwtext}」具普遍關切）、觀點衝突明顯，且存在可延展的多個寫作角度，"
@@ -836,42 +947,230 @@ def heuristic_research(news_list, clu):
             "arguments": arguments, "controversies": controversies, "counterintuitive": counterintuitive,
             "extension_questions": extension, "topics": topics, "writing_score": base, "writing_reason": reason}
 
+def norm_strength(s):
+    m = {"强": "強", "強": "強", "中": "中", "弱": "弱"}
+    return m.get((s or "").strip(), "中")
+
+def norm_cred(s):
+    m = {"高": "高", "中": "中", "低": "低", "待验证": "待驗證", "待驗證": "待驗證"}
+    return m.get((s or "").strip(), "中")
+
+def norm_basis(s):
+    m = {"事实": "事实", "事實": "事实", "推论": "推论", "推論": "推论",
+         "观点": "观点", "觀點": "观点", "待验证": "待驗證", "待驗證": "待驗證"}
+    return m.get((s or "").strip(), "推论")
+
+def _news_blob_for_ai(news_list, limit=10, per=350, cap=4200):
+    """將新聞壓縮為送給 LLM 的文字（控制 token：優先標題+摘要+來源+時間）。"""
+    parts, total = [], 0
+    for a in news_list[:limit]:
+        a = dict(a)
+        title = (a.get("title") or "").strip()
+        summ = clean_html(a.get("summary") or a.get("title") or "")
+        if len(summ) > per:
+            summ = summ[:per] + "…"
+        chunk = f"- 標題：{title}\n  摘要：{summ}\n  來源：{a.get('source','')} | 時間：{a.get('published_iso','')}"
+        if total + len(chunk) > cap:
+            break
+        parts.append(chunk); total += len(chunk)
+    return "\n".join(parts)
+
+def _research_json_schema():
+    return (
+      '{"event":"這件事到底是什麼（客觀一句，基於新聞）",'
+      '"core_question":"值得追問的核心問題",'
+      '"phenomenon":"現象描述（基於新聞內容，不要重複新聞原文）",'
+      '"why_matters":"為什麼值得寫成文章（普遍性/矛盾/衝突/情緒價值）",'
+      '"writing_score":0,'
+      '"writing_reason":"寫作價值評分理由（0-100，依據新鮮度/爭議性/普遍性/反常識/情緒價值/社會意義/可延展性/觀點衝突/文章可寫性）",'
+      '"arguments":[{"content":"論點（一句可被質疑的判斷）","explanation":"論證與依據","strength":"強/中/弱","credibility":"高/中/低/待驗證","basis":"事實/推論/觀點/待驗證","counter_argument":"反方最可能的反駁","my_response":"作者可如何回應"}],'
+      '"controversies":["爭議點1","爭議點2","爭議點3"],'
+      '"counterintuitive":["反直覺發現1"],'
+      '"extension_questions":["延伸問題1","延伸問題2","延伸問題3","延伸問題4","延伸問題5"],'
+      '"topics":[{"title":"潛在選題（新聞背後值得寫、但標題沒直接說的問題）","core_question":"選題核心問題","initial_view":"初步觀點(可空)","score":0}]}'
+    )
+
 def ai_news_research(news_list, clu):
     if LLM_API_KEY and news_list:
         try:
-            blob = "\n".join([f"- 標題：{dict(a).get('title','')}\n  摘要：{(dict(a).get('summary') or dict(a).get('title') or '')[:400]}\n  來源：{dict(a).get('source','')} | 時間：{dict(a).get('published_iso','')}" for a in news_list[:12]])
+            blob = _news_blob_for_ai(news_list)
             cluinfo = (f"事件聚合代表標題：{dict(clu).get('repr')}\n來源數：{dict(clu).get('size')}\n來源列表：{dict(clu).get('sources')}") if clu else "（單篇新聞，尚無多來源聚合）"
-            sys_p = ("你是資深媒體研究編輯，擅長把新聞轉化為有觀點、可寫作的研究線索。請嚴格只輸出 JSON，不要任何解釋。"
-                     "所有「數據/事實/案例/研究結論」若無法從提供的新聞中確認，請在相應欄位標註「待驗證」或留空，絕對不要編造具體數字、論文、機構或人物引用。"
-                     "若提供的新聞來源帶有連結，請保留其原始來源名稱。")
-            user_p = (f"以下是一組關於同一事件/主題的真實新聞：\n{blob}\n\n{cluinfo}\n\n請輸出如下結構的 JSON：\n"
-                      '{"event":"這件事到底是什麼（客觀一句）",'
-                      '"core_question":"值得追問的核心問題",'
-                      '"phenomenon":"現象描述（基於新聞內容）",'
-                      '"why_matters":"為什麼值得關注",'
-                      '"arguments":[{"content":"論點","explanation":"論證與依據","strength":"強/中/弱","credibility":"高/中/低/待驗證"}],'
-                      '"controversies":["爭議點1","爭議點2"],'
-                      '"counterintuitive":["反直覺發現1"],'
-                      '"extension_questions":["延伸問題1","延伸問題2","延伸問題3"],'
-                      '"topics":[{"title":"潛在選題","core_question":"選題核心問題","initial_view":"初步觀點(可空)","score":0}],'
-                      '"writing_score":0,"writing_reason":"評分理由"}')
-            out = call_llm(sys_p, user_p, max_tokens=1900)
+            sys_p = (
+                "你是一位資深媒體研究編輯與專欄寫作顧問。你的任務不是『總結新聞』，而是「從新聞中挖掘值得寫成文章的觀點」。"
+                "請站在寫作者視角，主動尋找：新聞背後的問題、普遍性、矛盾、反常識、利益衝突、不同立場，以及可以寫成文章的角度。"
+                "嚴格只輸出一個 JSON 物件，不要任何額外說明、不要 markdown 程式碼塊。"
+                "關於證據與真實性：所有「數據/事實/案例/研究結論/專家/機構/引用」都必須來自提供的新聞原文；"
+                "若新聞本身不足以支持某個結論，絕對不要編造具體數字、論文、專家姓名、機構或新聞來源，請在對應欄位填寫「證據不足，待驗證」。"
+                "對每個論點標註 basis：事實（新聞明確提供）/ 推論（由事實推理）/ 觀點（可討論非事實）/ 待驗證（無可靠證據）。"
+                "硬性要求：arguments 至少 5 個；controversies 至少 3 個；counterintuitive 至少 1 個；extension_questions 至少 5 個；topics 至少 5 個。"
+            )
+            user_p = (f"以下是一組關於同一事件/主題的真實新聞：\n{blob}\n\n{cluinfo}\n\n請輸出如下結構的 JSON：\n" + _research_json_schema())
+            out = call_llm(sys_p, user_p, max_tokens=2200, json_mode=True)
             if out:
                 m = re.search(r"\{.*\}", out, re.S)
                 data = json.loads(m.group(0)) if m else None
-                if data:
-                    for k in ("event", "core_question", "phenomenon", "why_matters", "writing_reason"):
-                        data.setdefault(k, "")
-                    for k in ("arguments", "controversies", "counterintuitive", "extension_questions", "topics"):
-                        data.setdefault(k, [])
-                    try: data["writing_score"] = int(data.get("writing_score") or 0)
-                    except Exception: data["writing_score"] = 0
-                    if not (0 < data["writing_score"] <= 100):
-                        data["writing_score"] = writing_score_of(dict(news_list[0]), clu) if clu else 60
+                if data and isinstance(data, dict):
+                    data = _normalize_research_json(data, news_list, clu)
+                    data["_from_llm"] = True
                     return data
         except Exception as e:
             print(f"[ai research fallback] {e}")
     return heuristic_research(news_list, clu)
+
+def _normalize_research_json(data, news_list, clu):
+    for k in ("event", "core_question", "phenomenon", "why_matters", "writing_reason"):
+        data.setdefault(k, "")
+    for k in ("arguments", "controversies", "counterintuitive", "extension_questions", "topics"):
+        data.setdefault(k, [])
+    try:
+        data["writing_score"] = int(data.get("writing_score") or 0)
+    except Exception:
+        data["writing_score"] = 0
+    if not (0 < data["writing_score"] <= 100):
+        data["writing_score"] = writing_score_of(dict(news_list[0]), clu) if clu else 60
+    norm_args = []
+    for a in data["arguments"]:
+        if not isinstance(a, dict):
+            continue
+        norm_args.append({
+            "content": (a.get("content") or "").strip(),
+            "explanation": (a.get("explanation") or "").strip(),
+            "strength": norm_strength(a.get("strength")),
+            "credibility": norm_cred(a.get("credibility")),
+            "basis": norm_basis(a.get("basis")),
+            "counter_argument": (a.get("counter_argument") or a.get("counter_view") or "").strip(),
+            "my_response": (a.get("my_response") or "").strip(),
+        })
+    data["arguments"] = [x for x in norm_args if x["content"]]
+    # 數量保底：不足時以啟發式補齊（優先保留 AI 內容）
+    h = heuristic_research(news_list, clu)
+    def pad(key, need):
+        cur = list(data.get(key) or [])
+        extra = [x for x in (h.get(key) or []) if x not in cur]
+        while len(cur) < need and extra:
+            cur.append(extra.pop(0))
+        data[key] = cur
+    pad("arguments", 5)
+    pad("controversies", 3)
+    pad("counterintuitive", 1)
+    pad("extension_questions", 5)
+    pad("topics", 5)
+    return data
+
+# ----------------------------------------------------------------------------
+# 證據自動識別 / 相關素材檢索
+# ----------------------------------------------------------------------------
+_DATE_RE = re.compile(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}(日)?|\d{1,2}月\d{1,2}日|(今天|昨日|本周|本月|去年|前年|近日|當地時間|当地时间)")
+_NUM_RE = re.compile(r"\d[\d,\.]*\s?(%|％|億|万|萬|千|倍|美元|歐元|元|日圓|英镑|percent|亿)")
+_ORG_RE = re.compile(r"[\u4e00-\u9fa5]{2,}(公司|集團|集团|銀行|银行|大學|大学|部|署|局|委員會|委员会|研究所|實驗室|实验室|基金會|基金会|協會|协会)")
+_ENGORG_RE = re.compile(r"\b([A-Z][A-Za-z0-9&]+(?:\s[A-Z][A-Za-z0-9&]+){0,3}(?:\s(?:Inc|Corp|Corporation|Group|Bank|Labs|Ltd|LLC|PLC))?)\b")
+
+def _nearest_sentence(text, token, maxlen=120):
+    for s in re.split(r"(?<=[。！？!?；;])", text):
+        if token in s:
+            return s.strip()[:maxlen]
+    return token
+
+def extract_evidence(news_list, limit=8):
+    """從新聞原文自動抽取 事實/數據/案例/人物/機構/時間/地點，verified=1（來自原文）。"""
+    evs, seen = [], set()
+    for a in news_list[:10]:
+        a = dict(a)
+        text = clean_html(a.get("summary") or a.get("title") or "")
+        src = a.get("source", "")
+        url = a.get("link", "")
+        # 數據
+        for mm in _NUM_RE.findall(text):
+            seg = _nearest_sentence(text, mm)
+            key = ("data", seg)
+            if key in seen: continue
+            seen.add(key)
+            evs.append({"type": "数据", "title": f"數據：{seg[:38]}", "content": seg, "source": src, "source_url": url, "verified": 1})
+        # 機構（中文）
+        for mm in _ORG_RE.findall(text):
+            if ("org", mm) in seen: continue
+            seen.add(("org", mm))
+            evs.append({"type": "机构", "title": f"機構：{mm}", "content": f"新聞提及機構「{mm}」（來源：{src}）", "source": src, "source_url": url, "verified": 1})
+        # 機構（英文）
+        for mm in _ENGORG_RE.findall(text):
+            mm = mm.strip()
+            if len(mm) < 3 or ("engorg", mm) in seen: continue
+            seen.add(("engorg", mm))
+            evs.append({"type": "机构", "title": f"機構：{mm}", "content": f"新聞提及機構「{mm}」（來源：{src}）", "source": src, "source_url": url, "verified": 1})
+        # 時間
+        for mm in _DATE_RE.findall(text):
+            if ("date", mm) in seen: continue
+            seen.add(("date", mm))
+            evs.append({"type": "时间", "title": f"時間：{mm}", "content": f"新聞提及時間點「{mm}」（來源：{src}）", "source": src, "source_url": url, "verified": 1})
+        if len(evs) >= limit:
+            break
+    return evs[:limit]
+
+def find_related_news(news_list, clu, exclude_ids, limit=8):
+    """在 news 庫中按關鍵詞/標題/摘要尋找相關歷史新聞，作為「已有相關素材」。"""
+    kws = set()
+    for a in news_list:
+        try: kws.update(json.loads(dict(a).get("keywords") or "[]") or [])
+        except Exception: pass
+    kws = [k for k in kws if len(k) >= 2][:8]
+    if not kws:
+        return []
+    like = " OR ".join(["(title LIKE ? OR summary LIKE ? OR keywords LIKE ?)"] * len(kws))
+    args = []
+    for k in kws:
+        args += [f"%{k}%", f"%{k}%", f"%{k}%"]
+    sql = f"SELECT id,title,source,link,summary,published_iso FROM news WHERE ({like})"
+    if exclude_ids:
+        sql += f" AND id NOT IN ({','.join('?'*len(exclude_ids))})"
+        args += list(exclude_ids)
+    sql += " ORDER BY published DESC LIMIT ?"
+    args.append(limit)
+    c = db()
+    rows = c.execute(sql, args).fetchall()
+    c.close()
+    return [{"id": r["id"], "title": r["title"], "source": r["source"], "link": r["link"],
+             "summary": (r["summary"] or "")[:200], "published_iso": r["published_iso"]} for r in rows]
+
+_board_ai_cache = {"ts": 0, "key": "", "data": None}
+BOARD_AI_TTL = 30 * 60
+
+def ai_board_evaluate(cands):
+    """單次批次呼叫 LLM，對候選 TOP30 做寫作價值評分 + 背後選題角度。
+    回傳 {news_id: {"score":int,"angle":str}}；失敗/未配置回傳 {}（呼叫方以啟發式兜底，不報錯）。"""
+    global _board_ai_cache
+    if not LLM_API_KEY or not cands:
+        return {}
+    items = cands[:30]
+    key = "|".join(str(x["id"]) for x in items)
+    now = now_unix()
+    if _board_ai_cache["key"] == key and now - _board_ai_cache["ts"] < BOARD_AI_TTL:
+        return _board_ai_cache["data"] or {}
+    lines = []
+    for i, x in enumerate(items):
+        lines.append(f"{i+1}. id={x['id']} | 分類={x.get('category','')} | 來源={x.get('source','')} | 熱度={x.get('hotness',0)} | 標題：{x.get('title','')}")
+    blob = "\n".join(lines)
+    sys_p = ("你是媒體選題編輯。下方是今日候選新聞（編號+id+標題）。請對每一條評估「寫作價值」(0-100，"
+             "綜合新鮮度/爭議性/普遍性/反常識/情緒價值/社會意義/可延展性/觀點衝突/文章可寫性)，"
+             "並給出一個「新聞標題沒直接說、但值得寫成文章的角度」（從事件進入社會問題/普遍情緒/結構矛盾，不要只重複事件本身）。"
+             "嚴格只輸出 JSON 陣列，順序與輸入編號一致，每項格式："
+             '{"id":<數字>,"score":<0-100整數>,"angle":"角度文字"}。不要任何其他文字。')
+    user_p = f"候選新聞：\n{blob}\n\n請輸出 JSON 陣列。"
+    out = call_llm(sys_p, user_p, max_tokens=2600, json_mode=True, timeout=60)
+    result = {}
+    if out:
+        try:
+            m = re.search(r"\[.*\]", out, re.S)
+            arr = json.loads(m.group(0)) if m else None
+            if isinstance(arr, list):
+                for it in arr:
+                    if isinstance(it, dict) and "id" in it:
+                        try: sc = int(it.get("score") or 0)
+                        except Exception: sc = 0
+                        result[int(it["id"])] = {"score": max(0, min(100, sc)), "angle": (it.get("angle") or "").strip()}
+        except Exception as e:
+            print(f"[board ai parse fail] {e}")
+    _board_ai_cache = {"ts": now, "key": key, "data": result}
+    return result
 
 def api_research_board():
     c = db()
@@ -894,7 +1193,20 @@ def api_research_board():
         cands.append({"id": n["id"], "cluster_id": cid, "title": n["title"], "category": n["category"],
                       "source": n["source"], "link": n["link"], "published_iso": n["published_iso"],
                       "hotness": n["hotness"], "writing_score": ws, "why": sg["why"], "angle": sg["angle"], "topics": sg["topics"]})
+    # 第一階段：本地規則排序（熱度/重要度/突發/聚類）取候選
     cands.sort(key=lambda x: -x["writing_score"])
+    ai_used = False
+    # 第二階段：僅對 TOP30 做一次批次 AI 價值判斷（緩存 30 分鐘；失敗回退啟發式）
+    if LLM_API_KEY and cands:
+        ai_scores = ai_board_evaluate(cands)
+        if ai_scores:
+            for n in cands:
+                if n["id"] in ai_scores:
+                    n["writing_score"] = ai_scores[n["id"]]["score"]
+                    if ai_scores[n["id"]]["angle"]:
+                        n["angle"] = ai_scores[n["id"]]["angle"]
+            ai_used = True
+            cands.sort(key=lambda x: -x["writing_score"])
     today_worthy = cands[:10]
     my = [dict(r) for r in c.execute("SELECT * FROM researches ORDER BY updated_at DESC").fetchall()]
     def by(st): return [x for x in my if x["status"] in st]
@@ -902,6 +1214,7 @@ def api_research_board():
     need_ev = by(("待补证据",))
     need_verify = by(("待验证",))
     done = by(("已完成", "已转文章"))
+    # 今日選題機會：來自評分後 TOP30 中高分者，突出「標題背後的問題」
     opps = []
     for n in cands[:30]:
         if n["writing_score"] < 50: continue
@@ -913,6 +1226,7 @@ def api_research_board():
     c.close()
     return {"today_worthy": today_worthy, "studying": studying, "need_evidence": need_ev,
             "need_verify": need_verify, "done": done, "topic_opportunities": opps,
+            "ai_enabled": bool(LLM_API_KEY), "ai_used": ai_used,
             "counts": {"research": len(my), "argument": acount, "topic": tcount}}
 
 def api_research_detail(params):
@@ -935,8 +1249,15 @@ def api_research_detail(params):
     for f in ("controversies", "counterintuitive", "extension_questions"):
         try: r[f] = json.loads(r.get(f) or "[]")
         except Exception: r[f] = []
+    # 已有相關素材：在 news 庫中按關鍵詞搜尋（不含已連結的新聞）
+    clu = None
+    if r["cluster_id"]:
+        cl = c.execute("SELECT * FROM clusters WHERE cluster_id=?", (r["cluster_id"],)).fetchone()
+        clu = dict(cl) if cl else None
+    nids = [n["id"] for n in news]
+    related = find_related_news(news, clu, exclude_ids=set(nids), limit=8)
     c.close()
-    return {"research": r, "news": news, "arguments": args, "topics": topics}
+    return {"research": r, "news": news, "arguments": args, "topics": topics, "related_news": related}
 
 def api_research_create(body):
     news_id = body.get("news_id"); cluster_id = body.get("cluster_id")
@@ -984,40 +1305,96 @@ def api_research_status(body):
 
 def api_research_ai(body):
     news_id = body.get("news_id"); cluster_id = body.get("cluster_id"); research_id = body.get("research_id")
+    force = bool(body.get("force"))
     news, clu = load_news_set(news_id, cluster_id, research_id)
     if not news: return {"error": "no news"}
-    ai = ai_news_research(news, clu)
     c = db()
-    rid = research_id
-    if not rid:
+    # 定位已存在的研究（用於緩存判斷）
+    existing = None
+    if research_id:
+        existing = c.execute("SELECT * FROM researches WHERE id=?", (research_id,)).fetchone()
+    elif news_id or cluster_id:
+        if news_id:
+            existing = c.execute("SELECT * FROM researches WHERE news_id=?", (news_id,)).fetchone()
+        if not existing and cluster_id:
+            existing = c.execute("SELECT * FROM researches WHERE cluster_id=?", (cluster_id,)).fetchone()
+    # 命中有效 AI 緩存且不強制重分析 -> 直接讀庫，不重複呼叫 LLM
+    if existing and not force and (existing["ai_generated"] or 0) == 1:
+        c.close()
+        return {"id": existing["id"], "ok": True, "cached": True, "ai_generated": True, "from_llm": True}
+    rid = existing["id"] if existing else None
+    ai = ai_news_research(news, clu)
+    used_llm = bool(ai.pop("_from_llm", False))
+    ct = iso(now_unix())
+    ai_gen = 1 if used_llm else 0
+    ai_model = LLM_MODEL if used_llm else ""
+    ai_at = ct if used_llm else ""
+    if rid is None:
         title = body.get("title")
         if not title:
             if clu: title = clu.get("repr")
             elif news: title = dict(news[0]).get("title") or "未命名研究"
             else: title = "未命名研究"
-        ct = iso(now_unix())
-        cur = c.execute("INSERT INTO researches(news_id,cluster_id,title,core_question,phenomenon,my_view,status,writing_score,event,why_matters,controversies,counterintuitive,extension_questions,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        cur = c.execute("INSERT INTO researches(news_id,cluster_id,title,core_question,phenomenon,my_view,status,writing_score,event,why_matters,controversies,counterintuitive,extension_questions,ai_generated,ai_model,ai_generated_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (news_id, (clu.get("cluster_id") if clu else (cluster_id or None)), title, ai["core_question"], ai["phenomenon"], "", "研究中", ai["writing_score"],
              ai["event"], ai["why_matters"], json.dumps(ai["controversies"], ensure_ascii=False),
-             json.dumps(ai["counterintuitive"], ensure_ascii=False), json.dumps(ai["extension_questions"], ensure_ascii=False), ct, ct))
+             json.dumps(ai["counterintuitive"], ensure_ascii=False), json.dumps(ai["extension_questions"], ensure_ascii=False),
+             ai_gen, ai_model, ai_at, ct, ct))
         rid = cur.lastrowid
         for n in news:
             c.execute("INSERT OR IGNORE INTO research_news(research_id,news_id) VALUES(?,?)", (rid, dict(n)["id"]))
     else:
-        c.execute("UPDATE researches SET core_question=?,phenomenon=?,event=?,why_matters=?,controversies=?,counterintuitive=?,extension_questions=?,writing_score=?,status=?,updated_at=? WHERE id=?",
+        c.execute("UPDATE researches SET core_question=?,phenomenon=?,event=?,why_matters=?,controversies=?,counterintuitive=?,extension_questions=?,writing_score=?,status=?,ai_generated=?,ai_model=?,ai_generated_at=?,updated_at=? WHERE id=?",
             (ai["core_question"], ai["phenomenon"], ai["event"], ai["why_matters"],
              json.dumps(ai["controversies"], ensure_ascii=False), json.dumps(ai["counterintuitive"], ensure_ascii=False),
-             json.dumps(ai["extension_questions"], ensure_ascii=False), ai["writing_score"], "研究中", iso(now_unix()), rid))
+             json.dumps(ai["extension_questions"], ensure_ascii=False), ai["writing_score"], "研究中", ai_gen, ai_model, ai_at, iso(now_unix()), rid))
+    # 先清舊證據與論點，再重建
+    c.execute("DELETE FROM evidence WHERE argument_id IN (SELECT id FROM arguments WHERE research_id=?)", (rid,))
     c.execute("DELETE FROM arguments WHERE research_id=?", (rid,))
+    arg_ids = []
     for a in ai["arguments"]:
-        c.execute("INSERT INTO arguments(research_id,content,explanation,strength,credibility,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-            (rid, a.get("content", ""), a.get("explanation", ""), a.get("strength", "中"), a.get("credibility", "中"), iso(now_unix()), iso(now_unix())))
+        cur = c.execute("INSERT INTO arguments(research_id,content,explanation,strength,credibility,basis,my_response,counter_view,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (rid, a.get("content",""), a.get("explanation",""), a.get("strength","中"), a.get("credibility","中"),
+             a.get("basis","推论"), a.get("my_response",""), a.get("counter_argument",""), iso(now_unix()), iso(now_unix())))
+        arg_ids.append(cur.lastrowid)
+    # 證據自動識別：從新聞原文抽取（verified=1），並連結到最相關的論點
+    evs = extract_evidence(news, limit=8)
+    def best_arg(ev_content):
+        best, bestscore = (arg_ids[0] if arg_ids else None), -1
+        if not arg_ids: return None
+        for i, a in enumerate(ai["arguments"]):
+            score = sum(1 for w in (a.get("content","")+a.get("explanation","")) if w and w in ev_content)
+            if score > bestscore:
+                bestscore = score; best = arg_ids[i]
+        return best
+    for ev in evs:
+        aid = best_arg(ev["content"])
+        if aid:
+            c.execute("INSERT INTO evidence(argument_id,type,title,content,source,source_url,verified,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (aid, ev["type"], ev["title"], ev["content"], ev["source"], ev["source_url"], 1, iso(now_unix())))
     c.execute("DELETE FROM topics WHERE research_id=?", (rid,))
     for t in ai.get("topics", []):
         c.execute("INSERT INTO topics(research_id,title,core_question,initial_view,status,score,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
             (rid, t.get("title", ""), t.get("core_question", ""), t.get("initial_view", ""), "待研究", int(t.get("score", 0) or 0), iso(now_unix()), iso(now_unix())))
     c.commit(); c.close()
-    return {"id": rid, "ok": True, "ai": ai}
+    # 若已配置 LLM 但本次呼叫失敗，標記 fallback（仍回傳啟發式結果，絕不讓頁面報錯）
+    llm_error = bool(LLM_API_KEY) and not used_llm
+    return {"id": rid, "ok": True, "ai_generated": bool(ai_gen), "from_llm": bool(used_llm),
+            "cached": False, "llm_error": llm_error, "fallback": llm_error, "ai": ai}
+
+def api_research_add_related_evidence(body):
+    """將一則「已有相關素材」新聞加入第一個論點的證據（verified=1，來自新聞原文）。"""
+    rid = body.get("research_id"); nid = body.get("news_id")
+    if not rid or not nid: return {"error": "need research_id & news_id"}
+    c = db()
+    a = c.execute("SELECT id FROM arguments WHERE research_id=? ORDER BY id LIMIT 1", (rid,)).fetchone()
+    if not a: c.close(); return {"error": "no argument"}
+    n = c.execute("SELECT title,summary,source,link FROM news WHERE id=?", (nid,)).fetchone()
+    if not n: c.close(); return {"error": "news not found"}
+    cur = c.execute("INSERT INTO evidence(argument_id,type,title,content,source,source_url,verified,created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (a["id"], "新聞", n["title"], (n["summary"] or "")[:200], n["source"], n["link"], 1, iso(now_unix())))
+    eid = cur.lastrowid; c.commit(); c.close()
+    return {"id": eid, "ok": True}
 
 def api_argument_create(body):
     rid = body.get("research_id")
@@ -1162,6 +1539,7 @@ class H(BaseHTTPRequestHandler):
             return
         try:
             if path == "/api/status": return self._send(200, api_status())
+            if path == "/api/llm/status": return self._send(200, api_llm_status())
             if path == "/api/categories": return self._send(200, api_categories())
             if path == "/api/sources": return self._send(200, api_sources())
             if path == "/api/news": return self._send(200, api_news(params))
@@ -1220,6 +1598,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/research/create": return self._send(200, api_research_create(body))
         if path == "/api/research/update": return self._send(200, api_research_update(body))
         if path == "/api/research/ai": return self._send(200, api_research_ai(body))
+        if path == "/api/research/related-evidence": return self._send(200, api_research_add_related_evidence(body))
         if path == "/api/research/status": return self._send(200, api_research_status(body))
         if path == "/api/arguments/create": return self._send(200, api_argument_create(body))
         if path == "/api/arguments/update": return self._send(200, api_argument_update(body))
