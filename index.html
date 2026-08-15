@@ -165,6 +165,48 @@ button{font-family:inherit;cursor:pointer}
 .libbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:14px}
 .libbar input,.libbar select{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff;color:var(--ink)}
 
+/* ===== 事件研究系統 ===== */
+.ent-groups{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px}
+.ent-col{flex:1;min-width:200px;background:#f8fafd;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.ent-col h5{margin:0 0 8px;font-size:12.5px;color:var(--blue2)}
+.ent-chip{display:inline-flex;align-items:center;gap:5px;background:var(--chip);color:var(--blue2);border-radius:20px;padding:3px 11px;margin:3px 4px 0 0;font-size:12.5px;cursor:pointer;border:1px solid transparent}
+.ent-chip:hover{border-color:var(--blue);background:#e7eefc}
+.ent-chip .ty{font-size:10px;color:var(--muted)}
+.fact-card{background:#f8fafd;border:1px solid var(--line);border-left:3px solid var(--green);border-radius:10px;padding:9px 12px;margin:6px 0;font-size:13px;line-height:1.6}
+.fact-card.single{border-left-color:var(--amber)}
+.fact-card .fc-meta{color:var(--muted);font-size:11.5px;margin-top:3px}
+.fact-badge{font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;margin-left:6px}
+.fact-badge.conf{background:#e7f6ec;color:var(--green)}
+.fact-badge.single{background:#fff3e0;color:var(--amber)}
+.conflict-card{background:#fff6f6;border:1px solid #f3c9cf;border-radius:10px;padding:10px 12px;margin:6px 0;font-size:13px}
+.conflict-card .cc-row{display:flex;gap:8px;align-items:baseline;margin:4px 0;flex-wrap:wrap}
+.conflict-card .cc-a{color:var(--red);font-weight:600}
+.conflict-card .cc-b{color:var(--amber);font-weight:600}
+.conflict-card .cc-src{font-size:11px;color:var(--muted)}
+.src-card{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#f8fafd;border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin:6px 0}
+.src-card .sc-main{font-weight:600;font-size:13.5px}
+.src-card .sc-sub{font-size:11.5px;color:var(--muted);text-align:right}
+.rel-evt{background:#f8fafd;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:6px 0;cursor:pointer}
+.rel-evt:hover{border-color:var(--blue)}
+.rel-evt .re-manual{font-size:10px;font-weight:700;color:#fff;background:var(--blue);border-radius:20px;padding:1px 7px;margin-left:6px}
+.rel-evt .re-shared{font-size:11px;color:var(--muted);margin-top:3px}
+.upd-card{background:#f8fafd;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:10px;padding:10px 12px;margin:6px 0;font-size:13px;line-height:1.6}
+.upd-card .up-time{font-size:11px;color:var(--muted);margin-bottom:4px}
+.upd-card ul{margin:4px 0 0;padding-left:18px}
+.track-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#f8fafd;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0}
+.track-toggle{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;user-select:none}
+.track-toggle .sw{width:40px;height:22px;border-radius:20px;background:#cfd6e2;position:relative;transition:.2s;flex:none}
+.track-toggle .sw.on{background:var(--green)}
+.track-toggle .sw:before{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.2s}
+.track-toggle .sw.on:before{left:20px}
+.ent-modal .em-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ent-modal .em-type{font-size:11px;font-weight:700;color:#fff;background:var(--blue);border-radius:20px;padding:1px 9px}
+.ent-modal .em-desc{color:#45506a;line-height:1.7;font-size:13px;background:#f8fafd;border-radius:10px;padding:9px 12px;margin:6px 0}
+.linkbox{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.linkbox input{flex:1;min-width:160px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff;color:var(--ink)}
+.link-hit{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#f8fafd;border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin:4px 0;font-size:12.5px}
+.link-hit button{flex:none}
+
 </head>
 <body>
 <div class="header">
@@ -348,6 +390,12 @@ button{font-family:inherit;cursor:pointer}
   <h2>⚙ AI 研究引擎</h2>
   <div class="tip">真實大模型研究引擎狀態（寫作價值評分 / 論點生成 / 證據識別）</div>
   <div id="setBody"></div>
+</div></div>
+
+<!-- 實體檔案 -->
+<div class="modal" id="mEntity"><div class="sheet ent-modal" style="max-width:760px">
+  <button class="close" onclick="closeModal('mEntity')">✕ 關閉</button>
+  <div id="entBody"></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
@@ -676,6 +724,17 @@ function renderBoard(b){
       <div style="margin-top:6px"><button class="btn small" onclick="addTopicOpportunity(${o.news_id},${o.cluster_id||0},'${ang}')">＋ 加入選題庫</button></div>
     </div>`;
   }
+  // 🔔 持續追蹤有進展
+  if(b.tracking_updates && b.tracking_updates.length){
+    h+=`<div class="rb-head"><h3>🔔 研究有新進展（${b.tracking_updates.length}）</h3><div class="sub">持續追蹤的事件已關聯到更多新聞</div></div>`;
+    for(const t of b.tracking_updates){
+      h+=`<div class="research-card" style="cursor:pointer;border-left:3px solid var(--green)" onclick="openResearchDetail(${t.id})">
+        <div class="ctop"><span class="ws" style="background:#e7f6ec;color:var(--green)">🟢 +${t.new_count} 新關聯</span></div>
+        <h4>${esc(t.title)}</h4>
+        <div class="mini">更新：${esc(t.updated_at||"")}</div>
+      </div>`;
+    }
+  }
   $("#rbBody").innerHTML=h;
 }
 function rbSection(title, items){
@@ -697,18 +756,85 @@ async function startResearch(news_id, cluster_id){
   openResearchDetail(r.id);
 }
 async function openResearchDetail(id){
-  const d=await getj("/api/research/detail?id="+id);
+  const [d, tl, src]=await Promise.all([
+    getj("/api/research/detail?id="+id),
+    getj("/api/research/timeline?id="+id),
+    getj("/api/research/sources?id="+id),
+  ]);
   if(d.error){toast(d.error);return;}
-  renderResearchDetail(d); openModal("mResearchDetail");
+  renderResearchDetail(d, tl.timeline||[], src.sources||[]);
+  openModal("mResearchDetail");
 }
-function renderResearchDetail(d){
+function renderTimeline(tl){
+  if(!tl||!tl.length) return `<div class="tip">暫無時間軸。</div>`;
+  return `<div class="timeline">`+tl.map(t=>{
+    const tm = `${esc(t.published_iso||"")} · ${esc(t.source||"")}`;
+    return `<div class="tl-item"><div class="tm">${tm}</div>`+
+      `<div><a href="${esc(t.link||"#")}" target="_blank" style="color:var(--ink)">${esc(t.title||"")}</a></div>`+
+      (t.progress?`<div class="tip">${esc(t.progress)}</div>`:"")+`</div>`;
+  }).join("")+`</div>`;
+}
+function renderSources(srcs){
+  if(!srcs||!srcs.length) return `<div class="tip">暫無來源。</div>`;
+  return srcs.map(s=>`<div class="src-card"><div class="sc-main">${esc(s.source)} <span class="sc-sub">· ${s.count} 篇</span></div>`+
+    `<div class="sc-sub">最早 ${esc(s.earliest||"—")}<br>最新 ${esc(s.latest||"—")}</div></div>`).join("");
+}
+function renderFacts(facts){
+  if(!facts||!facts.length) return `<div class="tip">暫無已確認事實（需多來源交叉印證）。</div>`;
+  return facts.map(f=>{
+    const conf = f.status==="confirmed";
+    return `<div class="fact-card ${conf?'':'single'}">${esc(f.content||"")}`+
+      `<span class="fact-badge ${conf?'conf':'single'}">${conf?('多源確認 ×'+(f.confirm_count||2)):'單源'}</span>`+
+      `<div class="fc-meta">來源：${esc(f.source||"")}${f.source_url?` · <a href="${esc(f.source_url)}" target="_blank">連結</a>`:""}${f.first_seen?` · ${esc(f.first_seen)}`:""}</div></div>`;
+  }).join("");
+}
+function renderConflicts(cfs){
+  if(!cfs||!cfs.length) return `<div class="tip">未發現明顯信息衝突（不同來源說法一致）。</div>`;
+  return cfs.map(c=>`<div class="conflict-card">
+    <div class="cc-row"><span class="cc-a">⚑ ${esc(c.claim_a||"")}</span> <span class="cc-src">（${esc(c.source_a||"")}）</span></div>
+    <div class="cc-row"><span class="cc-b">⚑ ${esc(c.claim_b||"")}</span> <span class="cc-src">（${esc(c.source_b||"")}）</span></div>
+  </div>`).join("");
+}
+function renderEntities(ents){
+  const labels={person:"人物",organization:"機構",location:"地點"};
+  const types=["person","organization","location"];
+  let any=false,h="<div class='ent-groups'>";
+  for(const ty of types){
+    const list=ents&&ents[ty]?ents[ty]:[];
+    if(list.length) any=true;
+    h+=`<div class="ent-col"><h5>${labels[ty]||ty}（${list.length}）</h5>`;
+    h+=(list.length?list.map(e=>`<span class="ent-chip" onclick="openEntityDetail(${e.id})">${esc(e.name)}<span class="ty">#${e.id}</span></span>`).join(""):`<span class="tip">—</span>`);
+    h+=`</div>`;
+  }
+  h+="</div>";
+  return any?h:`<div class="tip">暫未抽取到人物 / 機構 / 地點實體。</div>`;
+}
+function renderRelated(rel){
+  if(!rel||!rel.length) return `<div class="tip">暫無相關歷史事件。</div>`;
+  return rel.map(r=>`<div class="rel-evt" onclick="openResearchDetail(${r.id})">
+    <b>${esc(r.title)}</b>${r.manual?'<span class="re-manual">手動關聯</span>':''}
+    <div class="re-shared">相關度 ${r.score||""}${r.shared&&r.shared.length?(' · 共同關鍵詞：'+r.shared.map(s=>esc(s)).join("、")):""}</div>
+  </div>`).join("");
+}
+function renderUpdates(ups){
+  if(!ups||!ups.length) return `<div class="tip">尚無追蹤更新記錄。</div>`;
+  return ups.map(u=>`<div class="upd-card">
+    <div class="up-time">🕒 ${esc(u.created_at||"")}</div>
+    <div>${esc(u.summary||"")}</div>
+    ${(u.new_facts&&u.new_facts.length)?('<div class="mini" style="margin-top:4px"><b>新事實：</b></div><ul>'+u.new_facts.map(f=>`<li>${esc(f)}</li>`).join("")+'</ul>'):""}
+    ${(u.new_conflicts&&u.new_conflicts.length)?('<div class="mini" style="margin-top:4px"><b>新衝突：</b></div><ul>'+u.new_conflicts.map(f=>`<li>${esc(f)}</li>`).join("")+'</ul>'):""}
+  </div>`).join("");
+}
+function renderResearchDetail(d, timeline, sources){
   const r=d.research; curRid=r.id;
+  const tracking = (d.tracking==1)||(r.tracking==1);
   let aiBadge = (r.ai_generated==1) ? `<span class="chip" style="background:#e7f6ec;color:var(--green)">🤖 AI 已分析</span>` : `<span class="chip" style="background:#fff3e0;color:var(--amber)">🧩 啟發式</span>`;
   let h=`<div class="ctop" style="margin-bottom:6px">
     <span class="chip" style="background:#eaf1ff;color:var(--blue2)">${esc(r.status)}</span>
     <span class="ws">🔥 寫作價值 ${r.writing_score}</span>
     ${aiBadge}
-    <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted);margin-left:auto" onclick="reAnalyze(${r.id})">🔄 重新分析</button>
+    <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="reAnalyze(${r.id})">🔄 重新分析</button>
+    <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--blue2)" onclick="updateSummary(${r.id})">📝 更新研究摘要</button>
     <select id="rdStatus" onchange="updateResearchStatus(${r.id},this.value)" style="padding:4px 8px;border-radius:8px;border:1px solid var(--line)">
       ${["待研究","研究中","待补证据","待验证","已完成","已转文章"].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join("")}
     </select>
@@ -716,10 +842,24 @@ function renderResearchDetail(d){
   h+=`<h2 style="margin:4px 0 2px">${esc(r.title)}</h2>`;
   if(r.ai_generated==1) h+=`<div class="tip">🤖 已由 AI 分析（${esc(r.ai_model||'')} · ${esc(r.ai_generated_at||'')}）· 寫作價值 ${r.writing_score}</div>`;
   h+=`<div class="tip">寫作價值說明：${esc(r.writing_reason||"")}</div>`;
+  // 持續追蹤
+  h+=`<div class="track-row">
+    <div class="track-toggle" onclick="toggleTracking(${r.id})"><span class="sw ${tracking?'on':''}" id="trkSw"></span> 持續追蹤此事件</div>
+    <span class="tip" style="margin:0">${tracking?('已開啟 · 最後檢查 '+(d.last_checked_at||r.last_checked_at||'—')+' · 關聯新聞 '+(d.last_news_count||r.last_news_count||0)):'關閉中 · 採集到新聞後不會自動關聯'}</span>
+  </div>`;
   h+=sec("📌 發生了什麼？", esc(r.event||"無"));
   h+=sec("💡 為什麼值得關注？", esc(r.why_matters||"無"));
   h+=sec("❓ 核心問題", esc(r.core_question||"無"));
   h+=`<div class="sec"><h4>✍️ 我的觀點</h4><textarea id="rdMyView" rows="3" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;resize:vertical">${esc(r.my_view||"")}</textarea><div style="margin-top:6px"><button class="btn small" onclick="saveMyView(${r.id})">儲存觀點</button></div></div>`;
+  // 事件研究系統：時間線 / 來源 / 事實 / 衝突 / 實體 / 相關事件 / 更新歷史
+  h+=`<div class="sec"><h4>🕒 事件時間線（${timeline.length} 報導，按時間排序）</h4>${renderTimeline(timeline)}</div>`;
+  h+=`<div class="sec"><h4>📡 信息來源（${sources.length} 家）</h4>${renderSources(sources)}</div>`;
+  h+=`<div class="sec"><h4>✅ 已確認事實（多來源交叉印證）</h4>${renderFacts(d.facts)}</div>`;
+  h+=`<div class="sec"><h4>⚠️ 信息衝突（不同來源說法不一致）</h4>${renderConflicts(d.conflicts)}</div>`;
+  h+=`<div class="sec"><h4>👥 人物 / 機構 / 地點（點擊查看實體檔案）</h4>${renderEntities(d.entities)}</div>`;
+  h+=`<div class="sec"><h4>🔗 相關歷史事件（自動關聯 + 手動關聯）</h4>${renderRelated(d.related)}</div>`;
+  h+=`<div class="sec"><h4>🔔 追蹤更新歷史</h4>${renderUpdates(d.updates)}</div>`;
+  // 論點 / 證據
   h+=`<div class="rb-head"><h3>🧩 核心論點（${d.arguments.length}）</h3><button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="addArgument(${r.id})">＋ 新增論點</button></div>`;
   for(const a of d.arguments){
     h+=`<div class="arg-card">
@@ -743,6 +883,7 @@ function renderResearchDetail(d){
   if(r.controversies&&r.controversies.length) h+=sec("🧨 爭議點", r.controversies.map(x=>"• "+esc(x)).join("<br>"));
   if(r.counterintuitive&&r.counterintuitive.length) h+=sec("🔄 反直覺發現", r.counterintuitive.map(x=>"• "+esc(x)).join("<br>"));
   if(r.extension_questions&&r.extension_questions.length) h+=sec("🔭 延伸問題", r.extension_questions.map(x=>"• "+esc(x)).join("<br>"));
+  // 選題
   h+=`<div class="rb-head"><h3>📚 潛在選題（${d.topics.length}）</h3></div>`;
   for(const t of d.topics){
     h+=`<div class="topic-card">
@@ -764,7 +905,79 @@ function renderResearchDetail(d){
       </div>`;
     }
   }
+  // 手動關聯素材
+  h+=`<div class="rb-head"><h3>🔧 手動關聯素材</h3><div class="sub">若自動聚合遺漏，可手動加入相關新聞或相關研究</div></div>
+    <div class="linkbox">
+      <input id="lnKw" placeholder="關鍵字搜尋新聞以關聯…" onkeydown="if(event.key==='Enter')findLinkNews(${r.id})">
+      <button class="btn small" onclick="findLinkNews(${r.id})">🔍 找新聞</button>
+    </div>
+    <div id="lnHits"></div>
+    <div class="linkbox" style="margin-top:8px">
+      <input id="lrKw" placeholder="關鍵字搜尋研究以關聯…" onkeydown="if(event.key==='Enter')findLinkResearch(${r.id})">
+      <button class="btn small" onclick="findLinkResearch(${r.id})">🔍 找研究</button>
+    </div>
+    <div id="lrHits"></div>`;
   $("#rdBody").innerHTML=h;
+}
+async function openEntityDetail(eid){
+  const d=await getj("/api/entities/detail?id="+eid);
+  if(d.error){toast(d.error);return;}
+  const e=d.entity;
+  const typeLabel={person:"人物",organization:"機構",location:"地點"}[e.type]||e.type;
+  let h=`<div class="em-head"><span class="em-type">${typeLabel}</span><h2 style="margin:0">${esc(e.name)}</h2></div>`;
+  h+=`<div class="em-desc">${esc(e.description||"（尚無描述）")}</div>`;
+  h+=`<div class="rb-head"><h3>🔬 關聯事件（${d.events.length}）</h3></div>`;
+  if(!d.events.length) h+=`<div class="tip">暫無關聯事件。</div>`;
+  for(const ev of d.events){
+    h+=`<div class="rel-evt" onclick="openResearchDetail(${ev.id})"><b>${esc(ev.title)}</b><div class="re-shared">${esc(ev.status||"")}</div></div>`;
+  }
+  h+=`<div class="rb-head"><h3>📰 關聯新聞（${d.news.length}）</h3></div>`;
+  if(!d.news.length) h+=`<div class="tip">暫無關聯新聞。</div>`;
+  for(const n of d.news){
+    h+=`<div class="research-card" style="cursor:default"><div class="ctop"><span class="chip" style="background:#f0f3f9;color:#46536e">${esc(n.source)}</span><span class="chip" style="background:#f0f3f9;color:#46536e">${esc(n.published_iso||"")}</span></div><h4><a href="${esc(n.link)}" target="_blank">${esc(n.title)}</a></h4></div>`;
+  }
+  $("#entBody").innerHTML=h;
+  openModal("mEntity");
+}
+async function toggleTracking(rid){
+  const on = !($("#trkSw") && $("#trkSw").classList.contains("on"));
+  const r=await postj("/api/research/tracking",{id:rid,on});
+  if(r.error){toast(r.error);return;}
+  toast(r.tracking?"已開啟持續追蹤":"已關閉追蹤");
+  openResearchDetail(rid);
+}
+async function updateSummary(rid){
+  toast("正在更新研究摘要（基於新增新聞）…");
+  const r=await postj("/api/research/update-summary",{id:rid});
+  if(r.error){toast("失敗："+r.error);return;}
+  toast(r.from_llm?"🤖 已用 LLM 更新摘要":"已更新追蹤摘要（啟發式）");
+  openResearchDetail(rid);
+}
+async function findLinkNews(rid){
+  const kw=$("#lnKw").value.trim(); if(!kw){toast("請輸入關鍵字");return;}
+  const d=await getj("/api/news?q="+encodeURIComponent(kw)+"&limit=12");
+  const items=d.items||[];
+  if(!items.length){$("#lnHits").innerHTML=`<div class="tip">無符合的新聞。</div>`;return;}
+  $("#lnHits").innerHTML=items.map(n=>`<div class="link-hit"><span>${esc(n.title)} <span class="sc-sub">· ${esc(n.source)}</span></span><button class="btn small" onclick="doLinkNews(${rid},${n.id})">＋ 關聯</button></div>`).join("");
+}
+async function doLinkNews(rid,nid){
+  const r=await postj("/api/research/link-news",{id:rid,news_id:nid});
+  if(r.error){toast(r.error);return;}
+  toast("已關聯新聞，正在重建事實/衝突…");
+  openResearchDetail(rid);
+}
+async function findLinkResearch(rid){
+  const kw=$("#lrKw").value.trim(); if(!kw){toast("請輸入關鍵字");return;}
+  const d=await getj("/api/search?q="+encodeURIComponent(kw));
+  const items=(d.results||[]).filter(r=>r.type==="研究");
+  if(!items.length){$("#lrHits").innerHTML=`<div class="tip">無符合的研究。</div>`;return;}
+  $("#lrHits").innerHTML=items.map(r=>`<div class="link-hit"><span>${esc(r.title)} <span class="sc-sub">· ${esc(r.sub||"")}</span></span><button class="btn small" onclick="doLinkResearch(${rid},${r.id})">＋ 關聯</button></div>`).join("");
+}
+async function doLinkResearch(rid,relid){
+  const r=await postj("/api/research/link-related",{id:rid,related_id:relid});
+  if(r.error){toast(r.error);return;}
+  toast("已手動關聯相關事件");
+  openResearchDetail(rid);
 }
 function evItem(ev){
   const v = ev.verified? `<span class="pill cred-hi">已驗證</span>` : `<span class="ev-unverified">⚠️ 待驗證</span>`;
@@ -891,7 +1104,10 @@ function renderSearch(results,q){
   if(!results.length){$("#searchBody").innerHTML=`<div class="empty">沒有符合「${esc(q)}」的結果</div>`;return;}
   let h=`<div class="tip">全站搜尋「${esc(q)}」共 ${results.length} 筆：</div>`;
   for(const r of results){
-    const act = (r.type==="新聞") ? "" : `openResearchDetail(${r.rid})`;
+    let act="";
+    if(r.type==="新聞") act="";
+    else if(r.type==="實體") act=`openEntityDetail(${r.eid})`;
+    else act=`openResearchDetail(${r.rid})`;
     h+=`<div class="searchres" ${act?`style="cursor:pointer" onclick="${act}"`:""}><span class="tagtype ${r.type}">【${r.type}】</span><span class="t">${esc(r.title)}</span><div class="s">${esc(r.sub||"")}</div></div>`;
   }
   $("#searchBody").innerHTML=h;

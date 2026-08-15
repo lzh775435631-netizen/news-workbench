@@ -216,7 +216,44 @@ def init_db():
       topic_id INTEGER, argument_id INTEGER,
       PRIMARY KEY(topic_id, argument_id)
     );
+    CREATE TABLE IF NOT EXISTS entities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT, name TEXT, description TEXT DEFAULT '',
+      created_at TEXT, updated_at TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_uniq ON entities(type, name);
+    CREATE TABLE IF NOT EXISTS news_entities (
+      news_id INTEGER, entity_id INTEGER,
+      PRIMARY KEY(news_id, entity_id)
+    );
+    CREATE TABLE IF NOT EXISTS research_entities (
+      research_id INTEGER, entity_id INTEGER,
+      PRIMARY KEY(research_id, entity_id)
+    );
+    CREATE TABLE IF NOT EXISTS facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      research_id INTEGER, content TEXT, source TEXT, source_url TEXT,
+      first_seen TEXT, confirm_count INTEGER DEFAULT 1, status TEXT DEFAULT 'single',
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS conflicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      research_id INTEGER, type TEXT, claim_a TEXT, source_a TEXT,
+      claim_b TEXT, source_b TEXT, created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS research_updates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      research_id INTEGER, summary TEXT, new_facts TEXT, new_conflicts TEXT,
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS research_links (
+      research_id INTEGER, related_id INTEGER,
+      PRIMARY KEY(research_id, related_id)
+    );
     """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_facts_rid ON facts(research_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_conflicts_rid ON conflicts(research_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ru_rid ON research_updates(research_id)")
     _migrate_columns(c)
     c.commit(); c.close()
 
@@ -233,6 +270,9 @@ def _migrate_columns(c):
         ("researches", "ai_generated", "INTEGER DEFAULT 0"),
         ("researches", "ai_model", "TEXT DEFAULT ''"),
         ("researches", "ai_generated_at", "TEXT DEFAULT ''"),
+        ("researches", "tracking", "INTEGER DEFAULT 0"),
+        ("researches", "last_checked_at", "TEXT DEFAULT ''"),
+        ("researches", "last_news_count", "INTEGER DEFAULT 0"),
         ("arguments", "basis", "TEXT DEFAULT '推论'"),
     ):
         if not _column_exists(c, table, col):
@@ -430,6 +470,11 @@ def process_cycle():
     last_cycle_breaking = [dict(r) for r in brk_rows]
     prev_cluster_hot = new_prev
     last_sync = now_unix()
+    # 持續追蹤：自動關聯 tracking=1 研究的相關新新聞（失敗不影響採集）
+    try:
+        update_tracked_researches()
+    except Exception as e:
+        print(f"[cycle tracked error] {e}")
     conn.close()
     print(f"[cycle] +{last_cycle_new} new, clusters={len(groups)}, breaking={len(last_cycle_breaking)}, {time.time()-t0:.1f}s")
 
@@ -1061,8 +1106,8 @@ def _normalize_research_json(data, news_list, clu):
 # 證據自動識別 / 相關素材檢索
 # ----------------------------------------------------------------------------
 _DATE_RE = re.compile(r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}(日)?|\d{1,2}月\d{1,2}日|(今天|昨日|本周|本月|去年|前年|近日|當地時間|当地时间)")
-_NUM_RE = re.compile(r"\d[\d,\.]*\s?(%|％|億|万|萬|千|倍|美元|歐元|元|日圓|英镑|percent|亿)")
-_ORG_RE = re.compile(r"[\u4e00-\u9fa5]{2,}(公司|集團|集团|銀行|银行|大學|大学|部|署|局|委員會|委员会|研究所|實驗室|实验室|基金會|基金会|協會|协会)")
+_NUM_RE = re.compile(r"\d[\d,\.]*\s?(?:%|％|億|万|萬|千|倍|美元|歐元|元|日圓|英镑|percent|亿|人|名|起|例|宗|件)")
+_ORG_RE = re.compile(r"[\u4e00-\u9fa5]{2,}(?:公司|集團|集团|銀行|银行|大學|大学|部|署|局|委員會|委员会|研究所|實驗室|实验室|基金會|基金会|協會|协会)")
 _ENGORG_RE = re.compile(r"\b([A-Z][A-Za-z0-9&]+(?:\s[A-Z][A-Za-z0-9&]+){0,3}(?:\s(?:Inc|Corp|Corporation|Group|Bank|Labs|Ltd|LLC|PLC))?)\b")
 
 def _nearest_sentence(text, token, maxlen=120):
@@ -1130,6 +1175,226 @@ def find_related_news(news_list, clu, exclude_ids, limit=8):
     c.close()
     return [{"id": r["id"], "title": r["title"], "source": r["source"], "link": r["link"],
              "summary": (r["summary"] or "")[:200], "published_iso": r["published_iso"]} for r in rows]
+
+# ----------------------------------------------------------------------------
+# 實體 / 事實 / 衝突 抽取（規則優先；LLM 僅負責複雜判斷，不憑空創造）
+# ----------------------------------------------------------------------------
+_ENTITY_CACHE = {}
+def _get_or_create_entity(c, etype, name, desc=""):
+    name = (name or "").strip()
+    if not name or len(name) < 2: return None
+    key = (etype, name)
+    if key in _ENTITY_CACHE: return _ENTITY_CACHE[key]
+    row = c.execute("SELECT id FROM entities WHERE type=? AND name=?", (etype, name)).fetchone()
+    if row:
+        _ENTITY_CACHE[key] = row[0]; return row[0]
+    try:
+        cur = c.execute("INSERT INTO entities(type,name,description,created_at,updated_at) VALUES(?,?,?,?,?)",
+                        (etype, name, desc, iso(now_unix()), iso(now_unix())))
+        eid = cur.lastrowid
+    except Exception:
+        r2 = c.execute("SELECT id FROM entities WHERE type=? AND name=?", (etype, name)).fetchone()
+        if not r2: return None
+        eid = r2[0]
+    _ENTITY_CACHE[key] = eid
+    return eid
+
+_PERSON_RE = re.compile(r"(?:總統|主席|首相|總理|執行長|CEO|創辦人|部長|市長|州長|教授|專家|發言人|官員|分析師|法院|檢察官|律師|記者|董事長|局長|校長|將軍|司令)[\s：:、]*([\u4e00-\u9fa5]{2,3})")
+_PERSON_TRIM = ("表示","說","说","稱","称","指出","認為","认为","強調","强调","透露","宣布","稱為","称为","表示，","表示:")
+_LOC_RE = re.compile(r"[\u4e00-\u9fa5]{2,}(?:國|省|市|縣|區|島|半島|海|河|山|州|灣|港|高原|平原|群島)")
+_LOC_KNOWN = set("中國 美國 日本 俄羅斯 烏克蘭 台灣 香港 北京 上海 廣州 深圳 東京 華盛頓 倫敦 巴黎 柏林 莫斯科 首爾 新德里 以色列 巴勒斯坦 加薩 歐盟 聯合國 北韓 南韓 伊朗 敘利亞 法國 德國 英國 印度 巴西 加拿大 澳洲 朝鮮 泰國 越南 新加坡 澳門".split())
+
+def extract_entities(news_list, limit=24):
+    out = []; seen = set()
+    for a in news_list[:12]:
+        a = dict(a)
+        text = clean_html(a.get("summary") or a.get("title") or "")
+        nid = a.get("id"); src = a.get("source", ""); url = a.get("link", "")
+        for mm in list(_ORG_RE.findall(text)) + list(_ENGORG_RE.findall(text)):
+            mm = mm.strip()
+            if len(mm) < 3 or mm in seen: continue
+            seen.add(mm); out.append({"type": "organization", "name": mm, "news_id": nid, "source": src, "url": url, "desc": f"新聞提及機構（{src}）"})
+        for mm in _LOC_RE.findall(text):
+            if mm in seen: continue
+            if mm not in _LOC_KNOWN and len(mm) > 5: continue
+            seen.add(mm); out.append({"type": "location", "name": mm, "news_id": nid, "source": src, "url": url, "desc": f"新聞提及地點（{src}）"})
+        for mm in _PERSON_RE.findall(text):
+            name = mm.strip()
+            for suf in _PERSON_TRIM:
+                if name.endswith(suf): name = name[: -len(suf)]
+            if len(name) < 2 or name in seen: continue
+            seen.add(name); out.append({"type": "person", "name": name, "news_id": nid, "source": src, "url": url, "desc": f"新聞提及人物（{src}）"})
+        if len(out) >= limit: break
+    return out[:limit]
+
+def extract_facts(news_list, limit=12):
+    cands = []
+    for a in news_list[:12]:
+        a = dict(a)
+        text = clean_html(a.get("summary") or a.get("title") or "")
+        src = a.get("source", ""); url = a.get("link", ""); pub = a.get("published_iso", "")
+        for mm in _NUM_RE.findall(text):
+            subj = _nearest_subject(text, mm)
+            content = f"{subj}{mm}"
+            key = re.sub(r"[^一-鿿a-z0-9]", "", mm)
+            cands.append({"text": content, "source": src, "url": url, "pub": pub, "key": key})
+        for mm in _ORG_RE.findall(text) + list(_ENGORG_RE.findall(text)):
+            mm = mm.strip()
+            if len(mm) < 3: continue
+            seg = f"{mm}（{src} 報導）"
+            key = re.sub(r"[^一-鿿a-z0-9]", "", mm)[:12]
+            cands.append({"text": seg, "source": src, "url": url, "pub": pub, "key": key})
+    bykey = collections.defaultdict(list)
+    for cd in cands:
+        if cd["key"]: bykey[cd["key"]].append(cd)
+    facts = []; seen_text = set()
+    for key, items in bykey.items():
+        srcs = set(i["source"] for i in items if i["source"])
+        rep = max(items, key=lambda x: len(x["text"]))
+        content = rep["text"]
+        if content in seen_text: continue
+        seen_text.add(content)
+        confirm = len(srcs)
+        status = "confirmed" if confirm >= 2 else "single"
+        first_seen = min((i["pub"] for i in items if i["pub"]), default="")
+        facts.append({"content": content, "source": rep["source"], "source_url": rep["url"],
+                      "confirm_count": confirm, "status": status, "first_seen": first_seen})
+    return facts[:limit]
+
+_SUBJ_KW = ["傷亡","伤亡","受傷","受伤","死亡","罹難","遇难","遇難","罰款","罚款","罰金","罚金","投資","投资","融資","融资","裁員","裁员","損失","损失","營收","营收","獲利","获利","盈利","虧損","亏损","GDP","通膨","通胀","失業","失业","產值","产值","交易","募資","募资","預算","预算","債務","债务","匯率","汇率","利率","增長","增长","下跌","上漲","上涨","爆發","爆发","感染","確診","确诊"]
+def _nearest_subject(text, token):
+    """取數字前最近的「度量詞」（如 造成/遇難/裁員），跨來源穩定可用於衝突分組。"""
+    for s in re.split(r"(?<=[。！？!?；;])", text):
+        if token in s:
+            idx = s.index(token)
+            pre = s[:idx]
+            pre = re.sub(r"[\s，。、,.;:：！!?？；;]+$", "", pre)
+            m = re.search(r"[\u4e00-\u9fa5]{1,4}$", pre)
+            if m:
+                subj = m.group(0)
+                if subj not in STOP:
+                    return subj
+            for w in re.findall(r"[\u4e00-\u9fa5]{2,4}", s):
+                if w not in STOP: return w
+            return "事件"
+    return "事件"
+
+def detect_conflicts(news_list, limit=10):
+    groups = collections.defaultdict(list)  # (subj,unit) -> [(source, valuestr), ...]
+    for a in news_list[:12]:
+        a = dict(a)
+        text = clean_html(a.get("summary") or a.get("title") or "")
+        src = a.get("source", "")
+        seen_in_news = set()
+        for mm in _NUM_RE.findall(text):
+            m = re.match(r"([\d,\.]+)\s*(.*)", mm)
+            if not m: continue
+            num, unit = m.group(1), m.group(2)
+            key = (num, unit, src)
+            if key in seen_in_news: continue
+            seen_in_news.add(key)
+            subj = _nearest_subject(text, mm)
+            groups[(subj, unit)].append((src, f"{num}{unit}"))
+    conflicts = []
+    for (subj, unit), pairs in groups.items():
+        # 找兩個「不同數值、不同來源」的說法
+        distinct = {}
+        for src, val in pairs:
+            distinct.setdefault(val, set()).add(src)
+        if len(distinct) < 2: continue
+        vals = list(distinct.keys())
+        a0, a1 = vals[0], vals[1]
+        conflicts.append({"type": "数字", "claim_a": f"{subj}：{a0}", "source_a": "/".join(sorted(distinct[a0])),
+                          "claim_b": f"{subj}：{a1}", "source_b": "/".join(sorted(distinct[a1]))})
+        if len(conflicts) >= limit: break
+    return conflicts
+
+def rebuild_research_derived(c, rid, news_list):
+    """根據關聯新聞重建：實體連結、已確認事實、信息衝突。"""
+    ents = extract_entities(news_list)
+    for e in ents:
+        eid = _get_or_create_entity(c, e["type"], e["name"], e.get("desc", ""))
+        if not eid: continue
+        c.execute("INSERT OR IGNORE INTO research_entities(research_id,entity_id) VALUES(?,?)", (rid, eid))
+        if e.get("news_id"):
+            c.execute("INSERT OR IGNORE INTO news_entities(news_id,entity_id) VALUES(?,?)", (e["news_id"], eid))
+    c.execute("DELETE FROM facts WHERE research_id=?", (rid,))
+    for f in extract_facts(news_list):
+        c.execute("INSERT INTO facts(research_id,content,source,source_url,first_seen,confirm_count,status,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                  (rid, f["content"], f["source"], f["source_url"], f["first_seen"], f["confirm_count"], f["status"], iso(now_unix())))
+    c.execute("DELETE FROM conflicts WHERE research_id=?", (rid,))
+    for cf in detect_conflicts(news_list):
+        c.execute("INSERT INTO conflicts(research_id,type,claim_a,source_a,claim_b,source_b,created_at) VALUES(?,?,?,?,?,?,?)",
+                  (rid, cf["type"], cf["claim_a"], cf["source_a"], cf["claim_b"], cf["source_b"], iso(now_unix())))
+
+def find_related_researches(rid, limit=8):
+    """依賴關聯新聞關鍵詞重疊，發現相關歷史事件（不強制相同事件）。"""
+    c = db()
+    cur_kw = set()
+    for r in c.execute("SELECT n.keywords FROM news n JOIN research_news rn ON n.id=rn.news_id WHERE rn.research_id=?", (rid,)).fetchall():
+        try: cur_kw.update(json.loads(r[0] or "[]") or [])
+        except Exception: pass
+    cur_kw = set(k for k in cur_kw if len(k) >= 2)
+    if not cur_kw:
+        c.close(); return []
+    others = [x[0] for x in c.execute("SELECT DISTINCT research_id FROM research_news WHERE research_id!=?", (rid,)).fetchall()]
+    result = []
+    for oid in others:
+        okw = set()
+        for r in c.execute("SELECT n.keywords FROM news n JOIN research_news rn ON n.id=rn.news_id WHERE rn.research_id=?", (oid,)).fetchall():
+            try: okw.update(json.loads(r[0] or "[]") or [])
+            except Exception: pass
+        shared = cur_kw & okw
+        if shared:
+            score = min(99, int(40 + 60 * len(shared) / max(1, len(cur_kw))))
+            title = c.execute("SELECT title FROM researches WHERE id=?", (oid,)).fetchone()
+            result.append({"id": oid, "title": title[0] if title else "", "score": score, "shared": list(shared)[:5]})
+    c.close()
+    result.sort(key=lambda x: -x["score"])
+    return result[:limit]
+
+def update_tracked_researches():
+    """採集完成後自動關聯 tracking=1 研究的相關新新聞；不呼叫 LLM、不拋錯。"""
+    try:
+        c = db()
+        rows = [dict(r) for r in c.execute("SELECT id,cluster_id,last_news_count FROM researches WHERE tracking=1").fetchall()]
+        for r in rows:
+            rid = r["id"]
+            nids = set(x[0] for x in c.execute("SELECT news_id FROM research_news WHERE research_id=?", (rid,)).fetchall())
+            existing = [dict(x) for x in c.execute("SELECT * FROM news WHERE id IN (%s)" % (",".join("?"*len(nids)) or "0"), list(nids)).fetchall()] if nids else []
+            kws = set()
+            for n in existing:
+                try: kws.update(json.loads(n.get("keywords") or "[]") or [])
+                except Exception: pass
+            kws = [k for k in kws if len(k) >= 2][:8]
+            new_added = 0
+            if kws:
+                like = " OR ".join(["(title LIKE ? OR summary LIKE ? OR keywords LIKE ?)"] * len(kws))
+                args = []
+                for k in kws: args += [f"%{k}%", f"%{k}%", f"%{k}%"]
+                cand = [dict(x) for x in c.execute(f"SELECT * FROM news WHERE ({like})", args).fetchall()]
+                for n in cand:
+                    if n["id"] in nids: continue
+                    cur = c.execute("INSERT OR IGNORE INTO research_news(research_id,news_id) VALUES(?,?)", (rid, n["id"]))
+                    if cur.rowcount > 0:
+                        new_added += 1; nids.add(n["id"])
+            if r["cluster_id"]:
+                cln = [x[0] for x in c.execute("SELECT id FROM news WHERE cluster_id=? AND id NOT IN (%s)" % (",".join("?"*len(nids)) or "0"), [r["cluster_id"]] + list(nids)).fetchall()]
+                for nid in cln:
+                    cur = c.execute("INSERT OR IGNORE INTO research_news(research_id,news_id) VALUES(?,?)", (rid, nid))
+                    if cur.rowcount > 0:
+                        new_added += 1; nids.add(nid)
+            now_iso = iso(now_unix()); total = len(nids)
+            if new_added > 0:
+                c.execute("UPDATE researches SET last_checked_at=?,last_news_count=?,updated_at=? WHERE id=?", (now_iso, total, now_iso, rid))
+                allnews = [dict(x) for x in c.execute("SELECT * FROM news WHERE id IN (%s)" % (",".join("?"*len(nids)) or "0"), list(nids)).fetchall()] if nids else []
+                try: rebuild_research_derived(c, rid, allnews)
+                except Exception as e: print(f"[tracked derive err] {e}")
+            else:
+                c.execute("UPDATE researches SET last_checked_at=?,last_news_count=? WHERE id=?", (now_iso, total, rid))
+        c.commit(); c.close()
+    except Exception as e:
+        print(f"[update_tracked_researches error] {e}")
 
 _board_ai_cache = {"ts": 0, "key": "", "data": None}
 BOARD_AI_TTL = 30 * 60
@@ -1223,9 +1488,18 @@ def api_research_board():
         if len(opps) >= 8: break
     acount = c.execute("SELECT COUNT(*) FROM arguments").fetchone()[0]
     tcount = c.execute("SELECT COUNT(*) FROM topics").fetchone()[0]
+    # 🔔 持續追蹤：有進展的研究（關聯新聞數 > 上次檢查時數量）
+    tracking_updates = []
+    for r in my:
+        if (r.get("tracking") or 0) == 1:
+            cur_n = c.execute("SELECT COUNT(*) FROM research_news WHERE research_id=?", (r["id"],)).fetchone()[0]
+            last_n = r.get("last_news_count") or 0
+            if cur_n > last_n:
+                tracking_updates.append({"id": r["id"], "title": r["title"], "new_count": cur_n - last_n, "updated_at": r["updated_at"]})
     c.close()
     return {"today_worthy": today_worthy, "studying": studying, "need_evidence": need_ev,
             "need_verify": need_verify, "done": done, "topic_opportunities": opps,
+            "tracking_updates": tracking_updates,
             "ai_enabled": bool(LLM_API_KEY), "ai_used": ai_used,
             "counts": {"research": len(my), "argument": acount, "topic": tcount}}
 
@@ -1255,9 +1529,29 @@ def api_research_detail(params):
         cl = c.execute("SELECT * FROM clusters WHERE cluster_id=?", (r["cluster_id"],)).fetchone()
         clu = dict(cl) if cl else None
     nids = [n["id"] for n in news]
-    related = find_related_news(news, clu, exclude_ids=set(nids), limit=8)
+    related_news = find_related_news(news, clu, exclude_ids=set(nids), limit=8)
+    # 事件研究系統：事實 / 衝突 / 實體 / 相關事件 / 更新歷史（均來自關聯新聞，不憑空生成）
+    facts = [dict(x) for x in c.execute("SELECT * FROM facts WHERE research_id=? ORDER BY confirm_count DESC, id", (rid,)).fetchall()]
+    conflicts = [dict(x) for x in c.execute("SELECT * FROM conflicts WHERE research_id=? ORDER BY id", (rid,)).fetchall()]
+    ent_rows = [dict(x) for x in c.execute("SELECT e.* FROM entities e JOIN research_entities re ON e.id=re.entity_id WHERE re.research_id=?", (rid,)).fetchall()]
+    entities = {}
+    for e in ent_rows: entities.setdefault(e["type"], []).append(e)
+    auto_related = find_related_researches(rid)
+    manual_related = []
+    for x in c.execute("SELECT related_id FROM research_links WHERE research_id=?", (rid,)).fetchall():
+        rr = c.execute("SELECT id,title FROM researches WHERE id=?", (x[0],)).fetchone()
+        if rr: manual_related.append({"id": rr[0], "title": rr[1], "score": 100, "shared": [], "manual": True})
+    related = auto_related + manual_related
+    ups = [dict(x) for x in c.execute("SELECT * FROM research_updates WHERE research_id=? ORDER BY id", (rid,)).fetchall()]
+    for u in ups:
+        try: u["new_facts"] = json.loads(u.get("new_facts") or "[]")
+        except Exception: u["new_facts"] = []
+        try: u["new_conflicts"] = json.loads(u.get("new_conflicts") or "[]")
+        except Exception: u["new_conflicts"] = []
     c.close()
-    return {"research": r, "news": news, "arguments": args, "topics": topics, "related_news": related}
+    return {"research": r, "news": news, "arguments": args, "topics": topics, "related_news": related_news,
+            "facts": facts, "conflicts": conflicts, "entities": entities, "related": related, "updates": ups,
+            "tracking": r.get("tracking", 0), "last_checked_at": r.get("last_checked_at", ""), "last_news_count": r.get("last_news_count", 0)}
 
 def api_research_create(body):
     news_id = body.get("news_id"); cluster_id = body.get("cluster_id")
@@ -1278,6 +1572,9 @@ def api_research_create(body):
     elif cluster_id:
         for nid in c.execute("SELECT id FROM news WHERE cluster_id=?", (cluster_id,)).fetchall():
             c.execute("INSERT OR IGNORE INTO research_news(research_id,news_id) VALUES(?,?)", (rid, nid[0]))
+    news = [dict(x) for x in c.execute("SELECT * FROM news WHERE id IN (SELECT news_id FROM research_news WHERE research_id=?)", (rid,)).fetchall()]
+    try: rebuild_research_derived(c, rid, news)
+    except Exception as e: print(f"[create derive err] {e}")
     c.commit(); c.close()
     return {"id": rid, "ok": True}
 
@@ -1376,6 +1673,10 @@ def api_research_ai(body):
     for t in ai.get("topics", []):
         c.execute("INSERT INTO topics(research_id,title,core_question,initial_view,status,score,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
             (rid, t.get("title", ""), t.get("core_question", ""), t.get("initial_view", ""), "待研究", int(t.get("score", 0) or 0), iso(now_unix()), iso(now_unix())))
+    # 重建事件研究衍生資料：實體 / 事實 / 衝突（基於關聯新聞，不憑空生成）
+    allnews = [dict(x) for x in c.execute("SELECT * FROM news WHERE id IN (SELECT news_id FROM research_news WHERE research_id=?)", (rid,)).fetchall()]
+    try: rebuild_research_derived(c, rid, allnews)
+    except Exception as e: print(f"[ai derive err] {e}")
     c.commit(); c.close()
     # 若已配置 LLM 但本次呼叫失敗，標記 fallback（仍回傳啟發式結果，絕不讓頁面報錯）
     llm_error = bool(LLM_API_KEY) and not used_llm
@@ -1468,6 +1769,8 @@ def api_search(params):
         out.append({"type": "論點", "id": r["id"], "rid": r["research_id"], "title": (r["content"] or "")[:60], "sub": f"研究 #{r['research_id']}"})
     for r in c.execute("SELECT id,title,status,score,research_id FROM topics WHERE title LIKE ? OR core_question LIKE ? ORDER BY id DESC LIMIT 12", (like, like)).fetchall():
         out.append({"type": "選題", "id": r["id"], "rid": r["research_id"], "title": r["title"], "sub": f"{r['status']} · 寫作價值 {r['score']}"})
+    for r in c.execute("SELECT id,name,type,description FROM entities WHERE name LIKE ? OR description LIKE ? ORDER BY updated_at DESC LIMIT 8", (like, like)).fetchall():
+        out.append({"type": "實體", "id": r["id"], "eid": r["id"], "title": r["name"], "sub": f"{r['type']} · {(r['description'] or '')[:30]}"})
     c.close()
     return {"results": out}
 
@@ -1511,6 +1814,201 @@ def api_topics_list(params):
     return {"topics": out}
 
 # ----------------------------------------------------------------------------
+# 事件研究系統：時間線 / 來源 / 事實 / 衝突 / 實體 / 相關事件 / 追蹤 / 更新
+# ----------------------------------------------------------------------------
+def _linked_news(c, rid):
+    news = [dict(x) for x in c.execute("SELECT n.* FROM news n JOIN research_news rn ON n.id=rn.news_id WHERE rn.research_id=? ORDER BY n.published ASC", (rid,)).fetchall()]
+    if not news:
+        r = c.execute("SELECT cluster_id FROM researches WHERE id=?", (rid,)).fetchone()
+        if r and r["cluster_id"]:
+            news = [dict(x) for x in c.execute("SELECT * FROM news WHERE cluster_id=? ORDER BY published ASC", (r["cluster_id"],)).fetchall()]
+    return news
+
+def api_research_timeline(params):
+    try: rid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db(); news = _linked_news(c, rid); out = []
+    for n in news:
+        try: kws = json.loads(n.get("keywords") or "[]")
+        except Exception: kws = []
+        out.append({"published_iso": n["published_iso"], "title": n["title"], "source": n["source"],
+                    "link": n["link"], "progress": summarize(n.get("summary") or n.get("title") or "", kws, 90)})
+    c.close()
+    return {"timeline": out}
+
+def api_research_sources(params):
+    try: rid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db(); news = _linked_news(c, rid)
+    agg = collections.defaultdict(lambda: {"count": 0, "earliest": "", "latest": ""})
+    for n in news:
+        a = agg[n["source"]]; a["count"] += 1
+        if not a["earliest"] or (n["published_iso"] or "") < a["earliest"]: a["earliest"] = n["published_iso"] or ""
+        if (n["published_iso"] or "") > a["latest"]: a["latest"] = n["published_iso"] or ""
+    sources = [{"source": s, **v} for s, v in sorted(agg.items(), key=lambda kv: -kv[1]["count"])]
+    c.close()
+    return {"sources": sources}
+
+def api_research_facts(params):
+    try: rid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db()
+    facts = [dict(r) for r in c.execute("SELECT * FROM facts WHERE research_id=? ORDER BY confirm_count DESC, id", (rid,)).fetchall()]
+    c.close()
+    return {"facts": facts}
+
+def api_research_conflicts(params):
+    try: rid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db()
+    conflicts = [dict(r) for r in c.execute("SELECT * FROM conflicts WHERE research_id=? ORDER BY id", (rid,)).fetchall()]
+    c.close()
+    return {"conflicts": conflicts}
+
+def api_research_entities(params):
+    try: rid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db()
+    rows = [dict(r) for r in c.execute("SELECT e.* FROM entities e JOIN research_entities re ON e.id=re.entity_id WHERE re.research_id=?", (rid,)).fetchall()]
+    c.close()
+    grouped = {}
+    for e in rows: grouped.setdefault(e["type"], []).append(e)
+    return {"entities": grouped}
+
+def api_research_related(params):
+    try: rid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db()
+    auto = find_related_researches(rid)
+    manual = []
+    for r in c.execute("SELECT related_id FROM research_links WHERE research_id=?", (rid,)).fetchall():
+        rr = c.execute("SELECT id,title FROM researches WHERE id=?", (r[0],)).fetchone()
+        if rr: manual.append({"id": rr[0], "title": rr[1], "score": 100, "shared": [], "manual": True})
+    c.close()
+    return {"related": auto + manual}
+
+def api_research_updates(params):
+    try: rid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db()
+    ups = [dict(r) for r in c.execute("SELECT * FROM research_updates WHERE research_id=? ORDER BY id", (rid,)).fetchall()]
+    for u in ups:
+        try: u["new_facts"] = json.loads(u.get("new_facts") or "[]")
+        except Exception: u["new_facts"] = []
+        try: u["new_conflicts"] = json.loads(u.get("new_conflicts") or "[]")
+        except Exception: u["new_conflicts"] = []
+    c.close()
+    return {"updates": ups}
+
+def api_entities(params):
+    q = params.get("q", [""])[0].strip()
+    etype = params.get("type", [""])[0].strip()
+    c = db()
+    sql = "SELECT * FROM entities WHERE 1=1"; args = []
+    if q: sql += " AND (name LIKE ? OR description LIKE ?)"; args += [f"%{q}%", f"%{q}%"]
+    if etype: sql += " AND type=?"; args.append(etype)
+    sql += " ORDER BY updated_at DESC LIMIT 60"
+    rows = [dict(r) for r in c.execute(sql, args).fetchall()]
+    c.close()
+    return {"entities": rows}
+
+def api_entities_detail(params):
+    try: eid = int(params.get("id", [None])[0])
+    except Exception: return {"error": "need id"}
+    c = db()
+    e = c.execute("SELECT * FROM entities WHERE id=?", (eid,)).fetchone()
+    if not e: c.close(); return {"error": "not found"}
+    e = dict(e)
+    events = []
+    for r in c.execute("SELECT r.id,r.title,r.status FROM researches r JOIN research_entities re ON r.id=re.research_id WHERE re.entity_id=?", (eid,)).fetchall():
+        events.append({"id": r[0], "title": r[1], "status": r[2]})
+    news = []
+    for r in c.execute("SELECT n.id,n.title,n.source,n.published_iso,n.link FROM news n JOIN news_entities ne ON n.id=ne.news_id WHERE ne.entity_id=? ORDER BY n.published DESC LIMIT 20", (eid,)).fetchall():
+        news.append({"id": r[0], "title": r[1], "source": r[2], "published_iso": r[3], "link": r[4]})
+    c.close()
+    return {"entity": e, "events": events, "news": news}
+
+def api_research_tracking(body):
+    rid = body.get("id"); on = 1 if body.get("on") else 0
+    if not rid: return {"error": "need id"}
+    c = db()
+    r = c.execute("SELECT id FROM researches WHERE id=?", (rid,)).fetchone()
+    if not r: c.close(); return {"error": "not found"}
+    ncnt = c.execute("SELECT COUNT(*) FROM research_news WHERE research_id=?", (rid,)).fetchall()
+    ncnt = ncnt[0][0] if ncnt else 0
+    c.execute("UPDATE researches SET tracking=?,last_checked_at=?,last_news_count=? WHERE id=?", (on, iso(now_unix()), ncnt, rid))
+    c.commit(); c.close()
+    return {"ok": True, "tracking": on}
+
+def api_research_update_summary(body):
+    rid = body.get("id")
+    if not rid: return {"error": "need id"}
+    c = db()
+    r = c.execute("SELECT * FROM researches WHERE id=?", (rid,)).fetchone()
+    if not r: c.close(); return {"error": "not found"}
+    r = dict(r)
+    news = _linked_news(c, rid)
+    last_up = c.execute("SELECT MAX(created_at) FROM research_updates WHERE research_id=?", (rid,)).fetchone()[0]
+    new_news = [n for n in news if (n.get("published_iso") or "") > (last_up or "")] if last_up else news
+    new_news = new_news or news
+    nf = extract_facts(new_news)[:6]
+    nc = detect_conflicts(new_news)[:4]
+    if LLM_API_KEY:
+        try:
+            blob = _news_blob_for_ai(new_news, limit=10, per=260, cap=3200)
+            sys_p = ("你是事件追蹤編輯。基於「舊研究摘要」與「新增新聞」，輸出 JSON："
+                     "{\"summary\":\"最新事件進展（客觀、基於新聞）\",\"new_facts\":[\"新事實1\"],\"new_conflicts\":[\"新衝突1\"]}。"
+                     "只輸出 JSON，不要解釋；所有事實必須來自新聞，不可編造；無則填空陣列。")
+            user_p = (f"舊研究摘要：\n事件：{r.get('event','')}\n現象：{r.get('phenomenon','')}\n為什麼關注：{r.get('why_matters','')}\n\n"
+                      f"新增新聞（{len(new_news)} 則）：\n{blob}\n\n請輸出 JSON。")
+            out = call_llm(sys_p, user_p, max_tokens=1400, json_mode=True)
+            if out:
+                m = re.search(r"\{.*\}", out, re.S)
+                data = json.loads(m.group(0)) if m else None
+                if data and isinstance(data, dict):
+                    summary = (data.get("summary") or "").strip()
+                    llm_nf = data.get("new_facts") or []
+                    llm_nc = data.get("new_conflicts") or []
+                    if summary:
+                        c.execute("INSERT INTO research_updates(research_id,summary,new_facts,new_conflicts,created_at) VALUES(?,?,?,?,?)",
+                                  (rid, summary, json.dumps(llm_nf, ensure_ascii=False), json.dumps(llm_nc, ensure_ascii=False), iso(now_unix())))
+                        c.execute("UPDATE researches SET updated_at=? WHERE id=?", (iso(now_unix()), rid))
+                        c.commit(); c.close()
+                        return {"ok": True, "from_llm": True, "summary": summary, "new_facts": llm_nf, "new_conflicts": llm_nc}
+        except Exception as e:
+            print(f"[update summary llm fail] {e}")
+    summary = f"截至 {iso(now_unix())}，本事件共關聯 {len(news)} 則新聞。"
+    if last_up: summary += f" 其中 {len(new_news)} 則為最近一次更新後新增。"
+    nf_text = json.dumps([f["content"] for f in nf], ensure_ascii=False)
+    nc_text = json.dumps([f"{x['claim_a']}（{x['source_a']}） vs {x['claim_b']}（{x['source_b']}）" for x in nc], ensure_ascii=False)
+    c.execute("INSERT INTO research_updates(research_id,summary,new_facts,new_conflicts,created_at) VALUES(?,?,?,?,?)",
+              (rid, summary, nf_text, nc_text, iso(now_unix())))
+    c.execute("UPDATE researches SET updated_at=? WHERE id=?", (iso(now_unix()), rid))
+    c.commit(); c.close()
+    return {"ok": True, "from_llm": False, "summary": summary,
+            "new_facts": [f["content"] for f in nf], "new_conflicts": [f"{x['claim_a']} vs {x['claim_b']}" for x in nc]}
+
+def api_research_link_news(body):
+    rid = body.get("id") or body.get("research_id"); nid = body.get("news_id")
+    if not rid or not nid: return {"error": "need id & news_id"}
+    c = db()
+    cur = c.execute("INSERT OR IGNORE INTO research_news(research_id,news_id) VALUES(?,?)", (rid, nid))
+    ok = cur.rowcount > 0
+    news = [dict(x) for x in c.execute("SELECT * FROM news WHERE id IN (SELECT news_id FROM research_news WHERE research_id=?)", (rid,)).fetchall()]
+    try: rebuild_research_derived(c, rid, news)
+    except Exception as e: print(f"[link news derive err] {e}")
+    c.commit(); c.close()
+    return {"ok": True, "added": ok}
+
+def api_research_link_related(body):
+    rid = body.get("id") or body.get("research_id"); rel = body.get("related_id")
+    if not rid or not rel: return {"error": "need id & related_id"}
+    c = db()
+    c.execute("INSERT OR IGNORE INTO research_links(research_id,related_id) VALUES(?,?)", (rid, rel))
+    c.commit(); c.close()
+    return {"ok": True}
+
+# ----------------------------------------------------------------------------
 # HTTP 服務
 # ----------------------------------------------------------------------------
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1550,6 +2048,15 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/search/history": return self._send(200, api_search_history())
             if path == "/api/research/board": return self._send(200, api_research_board())
             if path == "/api/research/detail": return self._send(200, api_research_detail(params))
+            if path == "/api/research/timeline": return self._send(200, api_research_timeline(params))
+            if path == "/api/research/sources": return self._send(200, api_research_sources(params))
+            if path == "/api/research/facts": return self._send(200, api_research_facts(params))
+            if path == "/api/research/conflicts": return self._send(200, api_research_conflicts(params))
+            if path == "/api/research/entities": return self._send(200, api_research_entities(params))
+            if path == "/api/research/related": return self._send(200, api_research_related(params))
+            if path == "/api/research/updates": return self._send(200, api_research_updates(params))
+            if path == "/api/entities": return self._send(200, api_entities(params))
+            if path == "/api/entities/detail": return self._send(200, api_entities_detail(params))
             if path == "/api/arguments": return self._send(200, api_arguments_list(params))
             if path == "/api/topics": return self._send(200, api_topics_list(params))
             if path == "/api/search": return self._send(200, api_search(params))
@@ -1600,6 +2107,10 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/research/ai": return self._send(200, api_research_ai(body))
         if path == "/api/research/related-evidence": return self._send(200, api_research_add_related_evidence(body))
         if path == "/api/research/status": return self._send(200, api_research_status(body))
+        if path == "/api/research/tracking": return self._send(200, api_research_tracking(body))
+        if path == "/api/research/update-summary": return self._send(200, api_research_update_summary(body))
+        if path == "/api/research/link-news": return self._send(200, api_research_link_news(body))
+        if path == "/api/research/link-related": return self._send(200, api_research_link_related(body))
         if path == "/api/arguments/create": return self._send(200, api_argument_create(body))
         if path == "/api/arguments/update": return self._send(200, api_argument_update(body))
         if path == "/api/arguments/delete": return self._send(200, api_argument_delete(body))
