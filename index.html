@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>新聞情報工作台 · 最終版</title>
+<style>
+:root{
+  --bg:#f4f6fb; --panel:#ffffff; --ink:#1f2733; --muted:#6b7686; --line:#e6eaf1;
+  --blue:#2563eb; --blue2:#1d4ed8; --red:#e11d48; --amber:#f59e0b; --green:#16a34a;
+  --chip:#eef2fb; --shadow:0 1px 3px rgba(20,30,60,.08),0 6px 20px rgba(20,30,60,.06);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+a{color:var(--blue);text-decoration:none}
+button{font-family:inherit;cursor:pointer}
+.header{position:sticky;top:0;z-index:30;background:#0f1b33;color:#fff;display:flex;align-items:center;gap:16px;padding:10px 18px;box-shadow:var(--shadow)}
+.header .logo{font-weight:700;font-size:16px;letter-spacing:.5px;white-space:nowrap}
+.header .logo span{color:#5b9bff}
+.searchbar{flex:1;display:flex;gap:8px;max-width:760px}
+.searchbar input{flex:1;padding:9px 12px;border-radius:9px;border:1px solid #2a3a5c;background:#16233f;color:#fff;font-size:14px;outline:none}
+.searchbar input::placeholder{color:#8aa0c4}
+.btn{background:#1d4ed8;color:#fff;border:none;padding:9px 14px;border-radius:9px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn:hover{background:#2563eb}
+.btn.ghost{background:#16233f;border:1px solid #2a3a5c;color:#cfe0ff}
+.btn.ghost:hover{background:#1d2c4d}
+.btn.small{padding:5px 9px;font-size:12px;border-radius:7px}
+.live{display:flex;align-items:center;gap:10px;white-space:nowrap;font-size:12px}
+.live .dot{width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.18);animation:pulse 2s infinite}
+.live.alert .dot{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.2)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.live .meta{color:#9fb3d6;line-height:1.25}
+.live .meta b{color:#eaf1ff}
+
+.layout{display:grid;grid-template-columns:248px 1fr;gap:0;align-items:start}
+.sidebar{position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto;background:var(--panel);border-right:1px solid var(--line);padding:14px 12px}
+.side-sec{margin-bottom:18px}
+.side-title{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;margin:6px 6px 8px;text-transform:uppercase}
+.cat{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:9px;cursor:pointer;color:var(--ink);font-size:13.5px}
+.cat:hover{background:var(--chip)}
+.cat.active{background:var(--blue);color:#fff}
+.cat.active .cnt{background:rgba(255,255,255,.25);color:#fff}
+.cat .cnt{background:var(--chip);color:var(--muted);font-size:11px;padding:1px 8px;border-radius:20px}
+.cat.special{color:var(--blue2);font-weight:600}
+.src-item{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);padding:4px 10px}
+.src-item b{color:var(--ink);font-weight:500}
+.foot{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px;margin-top:6px;line-height:1.6}
+.foot .tag{display:inline-block;background:var(--chip);color:var(--blue2);border-radius:6px;padding:1px 7px;margin:2px 3px 0 0;font-size:10.5px}
+
+.main{padding:16px 20px 60px;min-width:0}
+.hottabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.hottab{padding:8px 13px;border-radius:11px;background:var(--panel);border:1px solid var(--line);font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;box-shadow:var(--shadow)}
+.hottab:hover{border-color:var(--blue)}
+.hottab .em{font-size:15px}
+.hottab .n{background:var(--chip);color:var(--muted);border-radius:20px;padding:0 7px;font-size:11px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:14px;box-shadow:var(--shadow)}
+.filters select,.filters input{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff;color:var(--ink)}
+.filters .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.filters .seg button{border:none;background:#fff;padding:7px 11px;font-size:12.5px;color:var(--muted)}
+.filters .seg button.on{background:var(--blue);color:#fff}
+.filters label{font-size:12px;color:var(--muted)}
+.listhead{display:flex;justify-content:space-between;align-items:baseline;margin:2px 2px 10px}
+.listhead h2{font-size:16px;margin:0}
+.listhead .sub{color:var(--muted);font-size:12px}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow);position:relative;transition:border-color .15s}
+.card:hover{border-color:#c7d4ee}
+.card .ctop{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+.chip{font-size:11px;padding:2px 9px;border-radius:20px;background:var(--chip);color:var(--blue2);font-weight:600}
+.chip.cat{background:#eaf1ff;color:var(--blue2)}
+.chip.imp{background:#fde8ee;color:var(--red)}
+.chip.brk{background:var(--red);color:#fff;font-weight:700}
+.chip.evt{background:#eef7ee;color:var(--green);cursor:pointer}
+.card h3{margin:2px 0 6px;font-size:16px;line-height:1.4}
+.card h3 a{color:var(--ink)}
+.card .sum{color:#45506a;line-height:1.7;font-size:13.5px;margin:0 0 10px}
+.card .cmeta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+.card .cmeta .hot{font-weight:700}
+.hot-hi{color:var(--red)} .hot-mid{color:var(--amber)} .hot-lo{color:var(--muted)}
+.card .acts{position:absolute;top:12px;right:14px;display:flex;gap:4px;opacity:0;transition:.15s}
+.card:hover .acts{opacity:1}
+.act{background:#f3f6fc;border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;color:#46536e}
+.act:hover{background:#e7eefc;border-color:var(--blue);color:var(--blue)}
+.act.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.kws{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.kw{font-size:11px;color:var(--muted);background:#f6f8fc;border:1px solid var(--line);border-radius:6px;padding:1px 7px}
+.empty{text-align:center;color:var(--muted);padding:60px 0}
+.empty .big{font-size:40px;margin-bottom:8px}
+
+.modal{position:fixed;inset:0;background:rgba(12,20,38,.55);z-index:50;display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal.open{display:flex}
+.sheet{background:var(--panel);border-radius:16px;max-width:980px;width:100%;padding:22px 24px;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:rise .2s ease}
+@keyframes rise{from{transform:translateY(14px);opacity:.6}to{transform:none;opacity:1}}
+.sheet h2{margin:0 0 4px;font-size:20px}
+.sheet .close{float:right;background:#f0f3f9;border:none;border-radius:8px;padding:6px 11px;font-size:13px;color:#46536e}
+.sheet .close:hover{background:#e3e9f4}
+.brief-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px}
+.brief-col h4{margin:0 0 8px;font-size:14px;color:var(--blue2);border-left:3px solid var(--blue);padding-left:8px}
+.brief-item{padding:8px 0;border-bottom:1px dashed var(--line)}
+.brief-item .t{font-weight:600;font-size:13.5px}
+.brief-item .m{color:var(--muted);font-size:12px;margin-top:2px}
+.kwcloud{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.kwcloud span{background:var(--chip);border-radius:20px;padding:3px 12px;font-size:12.5px;color:var(--blue2)}
+.research .sec{margin:14px 0}
+.research .sec h4{font-size:13px;color:var(--red);margin:0 0 5px;letter-spacing:.5px}
+.research .sec .body{color:#37425c;line-height:1.75;font-size:13.5px;background:#f8fafd;border-radius:10px;padding:10px 12px}
+.timeline{position:relative;padding-left:18px}
+.timeline:before{content:"";position:absolute;left:5px;top:4px;bottom:4px;width:2px;background:var(--line)}
+.tl-item{position:relative;padding:6px 0}
+.tl-item:before{content:"";position:absolute;left:-16px;top:11px;width:9px;height:9px;border-radius:50%;background:var(--blue)}
+.tl-item .tm{font-size:11.5px;color:var(--muted)}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:16px}
+.stat-box{background:#f8fafd;border:1px solid var(--line);border-radius:12px;padding:14px}
+.stat-box h4{margin:0 0 10px;font-size:13px;color:var(--ink)}
+.stat-box.full{grid-column:1/-1}
+.kpi{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:6px}
+.kpi .k{text-align:center}
+.kpi .k b{display:block;font-size:24px;color:var(--blue)}
+.kpi .k span{font-size:11px;color:var(--muted)}
+.bar{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px}
+.bar .lab{width:78px;color:var(--muted);text-align:right;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .track{flex:1;background:#eef2f8;border-radius:6px;height:14px;overflow:hidden}
+.bar .fill{height:100%;background:var(--blue);border-radius:6px}
+.bar .val{width:42px;color:var(--muted);flex:none}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f1b33;color:#fff;padding:11px 20px;border-radius:12px;font-size:13px;z-index:80;box-shadow:var(--shadow);display:none}
+.toast.show{display:block;animation:rise .2s}
+.banner{position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:60;background:var(--red);color:#fff;padding:9px 22px;border-radius:0 0 12px 12px;font-size:13px;font-weight:600;display:none;box-shadow:var(--shadow)}
+.banner.show{display:block;animation:rise .25s}
+.tip{font-size:11px;color:var(--muted);margin-top:4px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.sidebar{position:relative;height:auto;top:0;border-right:none;border-bottom:1px solid var(--line)}.brief-grid,.stats-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">新聞情報<span>工作台</span> · 最終版</div>
+  <div class="searchbar">
+    <input id="q" placeholder="🔎 全文搜尋：關鍵字 / 標題 / 來源 / 標籤…" onkeydown="if(event.key==='Enter')applyFilters()">
+    <button class="btn" onclick="applyFilters()">搜尋</button>
+  </div>
+  <div class="live" id="live">
+    <span class="dot"></span>
+    <span class="meta">🟢 即時更新<br>最後同步：<b id="syncT">啟動中…</b></span>
+  </div>
+  <button class="btn ghost" onclick="openBriefing()">📰 每日簡報</button>
+  <button class="btn ghost" onclick="openHotspots()">🔥 熱點</button>
+  <button class="btn ghost" onclick="openStats()">📊 統計</button>
+  <button class="btn ghost" onclick="forceRefresh()">⟳ 重新整理</button>
+</div>
+<div class="banner" id="banner"></div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="side-sec">
+      <div class="side-title">新聞分類</div>
+      <div id="catList"></div>
+    </div>
+    <div class="side-sec">
+      <div class="side-title">我的整理</div>
+      <div class="cat special" data-cat="收藏" onclick="pickCat('收藏')">⭐ 收藏</div>
+      <div class="cat special" data-cat="稍后看" onclick="pickCat('稍后看')">📌 稍後閱讀</div>
+      <div class="cat special" data-cat="已读" onclick="pickCat('已读')">✓ 已讀</div>
+      <div class="cat special" data-cat="未读" onclick="pickCat('未读')">◌ 未讀</div>
+    </div>
+    <div class="side-sec">
+      <div class="side-title">RSS / API 動態消息</div>
+      <div id="srcList"></div>
+    </div>
+    <div class="foot">
+      <div>⚙ 定時自動採集：<b id="fetchInt">每 15 分鐘</b></div>
+      <div>🧹 自動去重：已啟用</div>
+      <div>🤖 AI 處理：分類 · 摘要 · 關鍵字 · 重要度 · 熱點 · 事件聚合</div>
+      <div style="margin-top:6px"><span class="tag">國內</span><span class="tag">國際</span><span class="tag">財經</span><span class="tag">科技</span><span class="tag">AI</span><span class="tag">軍事</span><span class="tag">體育</span>…</div>
+      <div style="margin-top:6px"><button class="btn small" onclick="openAddFeed()">＋ 新增自訂來源</button></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hottabs" id="hottabs"></div>
+    <div class="filters">
+      <select id="fCat"><option value="">全部分類</option></select>
+      <select id="fSource"><option value="">全部來源</option></select>
+      <select id="fTime">
+        <option value="">全部時間</option>
+        <option value="1">今天</option>
+        <option value="3">近 3 天</option>
+        <option value="7">近 7 天</option>
+      </select>
+      <label>最低熱度 <input id="fHot" type="number" min="0" max="100" value="0" style="width:56px"></label>
+      <select id="fRead"><option value="">已讀/未讀</option><option value="0">未讀</option><option value="1">已讀</option></select>
+      <div class="seg" id="fSort">
+        <button data-s="hot" class="on" onclick="setSort('hot')">🔥 熱度</button>
+        <button data-s="new" onclick="setSort('new')">🕒 最新</button>
+      </div>
+      <button class="btn small" onclick="applyFilters()">套用</button>
+      <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="resetFilters()">重置</button>
+    </div>
+
+    <div class="listhead">
+      <h2 id="listTitle">今日熱點新聞</h2>
+      <div class="sub" id="listSub"></div>
+    </div>
+    <div id="list"></div>
+  </main>
+</div>
+
+<!-- 每日簡報 -->
+<div class="modal" id="mBrief"><div class="sheet">
+  <button class="close" onclick="closeModal('mBrief')">✕ 關閉</button>
+  <h2 id="briefDate">每日新聞簡報</h2>
+  <div class="tip">由 AI 依當日真實新聞自動彙整</div>
+  <div id="briefBody"></div>
+</div></div>
+
+<!-- 熱點系統 -->
+<div class="modal" id="mHot"><div class="sheet" style="max-width:1040px">
+  <button class="close" onclick="closeModal('mHot')">✕ 關閉</button>
+  <h2>🔥 熱點系統</h2>
+  <div class="hottabs" id="hotNav" style="margin-top:10px"></div>
+  <div id="hotBody"></div>
+</div></div>
+
+<!-- 統計 -->
+<div class="modal" id="mStat"><div class="sheet" style="max-width:1040px">
+  <button class="close" onclick="closeModal('mStat')">✕ 關閉</button>
+  <h2>📊 數據統計</h2>
+  <div id="statBody"></div>
+</div></div>
+
+<!-- AI 研究 -->
+<div class="modal" id="mResearch"><div class="sheet research" style="max-width:900px">
+  <button class="close" onclick="closeModal('mResearch')">✕ 關閉</button>
+  <h2 id="resTitle">AI 新聞研究</h2>
+  <div class="tip" id="resMeta"></div>
+  <div id="resBody"></div>
+</div></div>
+
+<!-- 筆記/標籤 -->
+<div class="modal" id="mNote"><div class="sheet" style="max-width:560px">
+  <button class="close" onclick="closeModal('mNote')">✕ 關閉</button>
+  <h2>📝 筆記與標籤</h2>
+  <div id="noteBody"></div>
+</div></div>
+
+<!-- 新增來源 -->
+<div class="modal" id="mFeed"><div class="sheet" style="max-width:520px">
+  <button class="close" onclick="closeModal('mFeed')">✕ 關閉</button>
+  <h2>＋ 新增自訂 RSS 來源</h2>
+  <div style="margin-top:12px;display:grid;gap:10px">
+    <input id="fdName" class="filters-input" placeholder="來源名稱" style="padding:9px;border:1px solid var(--line);border-radius:8px;width:100%">
+    <input id="fdUrl" placeholder="RSS 網址 (https://…)" style="padding:9px;border:1px solid var(--line);border-radius:8px;width:100%">
+    <input id="fdCat" placeholder="分類 (如：自訂分類)" style="padding:9px;border:1px solid var(--line);border-radius:8px;width:100%">
+    <button class="btn" onclick="addFeed()">新增並採集</button>
+  </div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "";
+let state = { cat:"全部", q:"", source:"", time:"", hot:0, read:"", sort:"hot", starred:0, later:0 };
+let clusterSize = {}; // cluster_id -> size
+let lastNewsTs = 0;
+
+function $(s){return document.querySelector(s)}
+function fmtTime(iso){ if(!iso) return ""; const d=new Date(iso.replace(" ","T")+":00"); const diff=(Date.now()-d)/1000;
+  if(diff<3600) return Math.max(1,Math.floor(diff/60))+" 分鐘前";
+  if(diff<86400) return Math.floor(diff/3600)+" 小時前";
+  return iso.split(" ")[0]; }
+function esc(s){return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200);}
+
+async function getj(path){const r=await fetch(API+path);return r.json();}
+async function postj(path,body){const r=await fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});return r.json();}
+
+// ---------- 側欄 ----------
+async function loadSidebar(){
+  const [cats,sources,status]=await Promise.all([getj("/api/categories"),getj("/api/sources"),getj("/api/status")]);
+  let html=`<div class="cat ${state.cat==='全部'?'active':''}" data-cat="全部" onclick="pickCat('全部')">全部新聞 <span class="cnt">${status.total||0}</span></div>`;
+  for(const c of cats.categories){ html+=`<div class="cat ${state.cat===c?'active':''}" data-cat="${esc(c)}" onclick="pickCat('${esc(c)}')">${esc(c)} <span class="cnt">${cats.counts[c]||0}</span></div>`; }
+  $("#catList").innerHTML=html;
+  let sh='';for(const s of sources.sources.slice(0,40)){ sh+=`<div class="src-item"><b>${esc(s.name)}</b><span>${s.count}</span></div>`; }
+  $("#srcList").innerHTML=sh;
+  $("#fetchInt").textContent="每 "+status.fetch_interval+" 分鐘";
+  // 來源下拉
+  let so='<option value="">全部來源</option>';for(const s of sources.sources){so+=`<option value="${esc(s.name)}">${esc(s.name)}</option>`;}
+  $("#fSource").innerHTML=so;
+  let co='<option value="">全部分類</option>';for(const c of cats.categories){co+=`<option value="${esc(c)}">${esc(c)}</option>`;}
+  $("#fCat").innerHTML=co;
+}
+
+// ---------- 熱點標籤 ----------
+async function loadHotTabs(){
+  const h=await getj("/api/hotspots");
+  // build cluster size map
+  for(const c of h.rising.concat(h.falling)) clusterSize[c.cluster_id]=c.size;
+  const tabs=[
+    {em:"🔥",t:"今日熱點",n:h.today_hot.length,fn:()=>showHotList("今日熱點",h.today_hot)},
+    {em:"🚀",t:"正在升溫",n:h.rising.length,fn:()=>showHotClusters("正在升溫",h.rising)},
+    {em:"📉",t:"熱度下降",n:h.falling.length,fn:()=>showHotClusters("熱度下降",h.falling)},
+    {em:"⚡",t:"突發新聞",n:h.breaking.length,fn:()=>showHotList("突發新聞",h.breaking)},
+    {em:"🧨",t:"高爭議",n:h.controversial.length,fn:()=>showHotList("高爭議新聞",h.controversial)},
+    {em:"📊",t:"熱點排行",n:h.ranking.length,fn:()=>showHotList("熱點排行榜",h.ranking)},
+    {em:"🔑",t:"熱點關鍵字",n:h.keywords.length,fn:()=>showKeywords(h.keywords)},
+    {em:"🕸️",t:"事件關聯",n:h.graph.edges.length,fn:()=>showGraph(h.graph)},
+  ];
+  let ht="";for(const t of tabs){ht+=`<div class="hottab" onclick="openHotOne('${esc(t.t)}')"><span class="em">${t.em}</span>${t.t}<span class="n">${t.n}</span></div>`;}
+  $("#hottabs").innerHTML=ht;
+  window.__hot=tabs;
+}
+function openHotOne(t){ const tab=window.__hot.find(x=>x.t===t); openHotspots(); setTimeout(()=>tab.fn(),60); }
+
+// ---------- 新聞列表 ----------
+async function loadNews(){
+  let p=`/api/news?category=${encodeURIComponent(state.cat)}&q=${encodeURIComponent(state.q)}&source=${encodeURIComponent(state.source)}&minHot=${state.hot}&sort=${state.sort}`;
+  if(state.read!=="") p+=`&read=${state.read}`;
+  if(state.time){ const d=new Date(); d.setDate(d.getDate()-parseInt(state.time)); p+=`&from=${d.toISOString().slice(0,10)}`; }
+  const data=await getj(p);
+  renderList(data.items);
+  $("#listSub").textContent=`共 ${data.count} 筆`;
+  $("#listTitle").textContent = state.q? `搜尋「${state.q}」` : (state.cat==="全部"?"今日熱點新聞":state.cat+" 新聞");
+}
+function hotClass(h){return h>=68?"hot-hi":h>=42?"hot-mid":"hot-lo";}
+function renderList(items){
+  if(!items.length){$("#list").innerHTML=`<div class="empty"><div class="big">🗞️</div>暫無新聞，請稍候或點擊「重新整理」。</div>`;return;}
+  let h="";
+  for(const n of items){
+    const sz=clusterSize[n.cluster_id]||1;
+    const evt = sz>1?`<span class="chip evt" onclick="openResearch(${n.cluster_id})" title="同一事件多來源聚合">🔗 ${sz} 來源</span>`:"";
+    const brk = n.is_breaking?`<span class="chip brk">⚡ 突發</span>`:"";
+    const imp = n.importance==="高"?`<span class="chip imp">重要</span>`:"";
+    const kws=(JSON.parse(n.keywords||"[]")||[]).slice(0,5).map(k=>`<span class="kw">${esc(k)}</span>`).join("");
+    const starOn=n.starred?"on":""; const laterOn=n.later?"on":""; const readOn=n.read?"on":"";
+    h+=`<div class="card">
+      <div class="acts">
+        <button class="act ${starOn}" title="收藏" onclick="act(${n.id},'star',this)">⭐</button>
+        <button class="act ${laterOn}" title="稍後看" onclick="act(${n.id},'later',this)">📌</button>
+        <button class="act ${readOn}" title="已讀" onclick="act(${n.id},'read',this)">✓</button>
+        <button class="act" title="筆記/標籤" onclick="openNote(${n.id})">📝</button>
+        <button class="act" title="分享" onclick="share('${esc(n.link)}')">🔗</button>
+      </div>
+      <div class="ctop">
+        <span class="chip cat">${esc(n.category)}</span>${imp}${brk}
+        <span class="chip" style="background:#f0f3f9;color:#46536e">${esc(n.source)}</span>${evt}
+      </div>
+      <h3><a href="${esc(n.link)}" target="_blank" onclick="markRead(${n.id})">${esc(n.title)}</a></h3>
+      <p class="sum">${esc(n.summary||"")}</p>
+      <div class="cmeta">
+        <span>🕒 ${fmtTime(n.published_iso)}</span>
+        <span class="hot ${hotClass(n.hotness)}">🔥 熱度 ${n.hotness}</span>
+        <span>重要度：${n.importance}</span>
+      </div>
+      <div class="kws">${kws}</div>
+    </div>`;
+  }
+  $("#list").innerHTML=h;
+}
+async function act(id,type,el){
+  let on=true;
+  if(type==="star"){on=!el.classList.contains("on");}
+  if(type==="later"){on=!el.classList.contains("on");}
+  if(type==="read"){on=!el.classList.contains("on");}
+  await postj("/api/news/action",{id,action:type,on});
+  el.classList.toggle("on",on);
+  if(type!=="read") toast(type==="star"?(on?"已收藏":"已取消收藏"):(on?"已加入稍後閱讀":"已移除"));
+}
+function markRead(id){ postj("/api/news/action",{id,action:"read",on:true}); }
+
+// ---------- 過濾 ----------
+function pickCat(c){ state.cat=c; document.querySelectorAll(".cat").forEach(e=>e.classList.toggle("active",e.dataset.cat===c)); loadNews(); }
+function setSort(s){ state.sort=s; document.querySelectorAll("#fSort button").forEach(b=>b.classList.toggle("on",b.dataset.s===s)); loadNews(); }
+function applyFilters(){ state.q=$("#q").value.trim(); state.source=$("#fSource").value; state.hot=parseInt($("#fHot").value)||0; state.read=$("#fRead").value; loadNews(); }
+function resetFilters(){ $("#q").value="";$("#fSource").value="";$("#fHot").value=0;$("#fRead").value="";$("#fTime").value="";state={cat:"全部",q:"",source:"",time:"",hot:0,read:"",sort:state.sort};loadNews();loadSidebar(); }
+$("#fTime").addEventListener("change",e=>{state.time=e.target.value;loadNews();});
+$("#fCat").addEventListener("change",e=>{if(e.target.value)pickCat(e.target.value);});
+
+// ---------- 每日簡報 ----------
+async function openBriefing(){
+  const b=await getj("/api/briefing");
+  $("#briefDate").textContent="《"+b.date+" 全球新聞簡報》";
+  let h=`<div class="brief-grid">
+    <div class="brief-col"><h4>🌟 今日 10 大新聞</h4>${b.top10.map((x,i)=>briefItem(i+1,x)).join("")}</div>
+    <div class="brief-col"><h4>🚀 今日熱點趨勢</h4>${b.trending.map(x=>briefItem("",x,"🔥"+x.hotness)).join("")}</div>
+    <div class="brief-col"><h4>💹 財經重點</h4>${b.财经.map(x=>briefItem("",x)).join("")||"<div class='tip'>暫無</div>"}</div>
+    <div class="brief-col"><h4>🌍 國際重點</h4>${b.国际.map(x=>briefItem("",x)).join("")||"<div class='tip'>暫無</div>"}</div>
+    <div class="brief-col"><h4>🏠 國內重點</h4>${b.国内.map(x=>briefItem("",x)).join("")||"<div class='tip'>暫無</div>"}</div>
+    <div class="brief-col"><h4>🤖 科技 / AI 重點</h4>${b.科技.concat(b.AI).map(x=>briefItem("",x)).join("")||"<div class='tip'>暫無</div>"}</div>
+    <div class="brief-col full" style="grid-column:1/-1"><h4>🔭 值得持續關注事件（多來源）</h4>${b.watch.map(x=>briefItem("",x,(JSON.parse(x.sources||"[]").length)+"源")).join("")||"<div class='tip'>暫無</div>"}</div>
+  </div>`;
+  $("#briefBody").innerHTML=h;
+  openModal("mBrief");
+}
+function briefItem(i,x,extra=""){const tag=i?`<b style="color:var(--red)">${i}.</b> `:"";return `<div class="brief-item">${tag}<span class="t"><a href="${esc(x.link||"#")}" target="_blank">${esc(x.title)}</a></span><div class="m">${esc(x.source)} · ${extra||fmtTime(x.published_iso)}</div></div>`;}
+
+// ---------- 熱點系統 ----------
+function openHotspots(){ openModal("mHot"); renderHotNav(); }
+function renderHotNav(){
+  const tabs=window.__hot;
+  let h="";for(const t of tabs){h+=`<div class="hottab" style="cursor:pointer" onclick="runHot('${esc(t.t)}')"><span class="em">${t.em}</span>${t.t}</div>`;}
+  $("#hotNav").innerHTML=h;
+  tabs[0].fn();
+}
+function runHot(t){const tab=window.__hot.find(x=>x.t===t);if(tab)tab.fn();}
+function showHotList(title,items){
+  if(!items.length){$("#hotBody").innerHTML=`<div class="empty">暫無${title}</div>`;return;}
+  let h=`<h3 style="margin:14px 0 10px">${title}（${items.length}）</h3>`;
+  for(const n of items){
+    h+=`<div class="card" style="margin-bottom:10px"><div class="ctop"><span class="chip cat">${esc(n.category)}</span>${n.is_breaking?'<span class="chip brk">⚡</span>':''}<span class="chip" style="background:#f0f3f9;color:#46536e">${esc(n.source)}</span></div><h3 style="font-size:15px"><a href="${esc(n.link)}" target="_blank">${esc(n.title)}</a></h3><div class="cmeta"><span>🕒 ${fmtTime(n.published_iso)}</span><span class="hot ${hotClass(n.hotness)}">🔥 ${n.hotness}</span></div></div>`;
+  }
+  $("#hotBody").innerHTML=h;
+}
+function showHotClusters(title,items){
+  if(!items.length){$("#hotBody").innerHTML=`<div class="empty">暫無${title}</div>`;return;}
+  let h=`<h3 style="margin:14px 0 10px">${title}（${items.length} 事件）</h3>`;
+  for(const c of items){
+    const srcs=JSON.parse(c.sources||"[]");
+    h+=`<div class="card" style="cursor:pointer" onclick="openResearch(${c.cluster_id})"><div class="ctop"><span class="chip cat">${esc(c.category)}</span><span class="chip ${c.trend==='rising'?'imp':''}">${c.trend==='rising'?'🚀 升溫':c.trend==='falling'?'📉 降溫':'🆕 新'} ${c.hotness}</span><span class="chip evt">🔗 ${c.size} 來源</span></div><h3 style="font-size:15px">${esc(c.repr)}</h3><div class="cmeta"><span>${srcs.slice(0,4).join("、")}</span></div></div>`;
+  }
+  $("#hotBody").innerHTML=h;
+}
+function showKeywords(kws){
+  let h=`<h3 style="margin:14px 0 10px">🔑 熱點關鍵字（依熱度加權）</h3><div class="kwcloud">`;
+  const max=kws.length?kws[0].weight:1;
+  for(const k of kws){const sz=12+Math.round(14*(k.weight/max));h+=`<span style="font-size:${sz}px;background:#eaf1ff;color:var(--blue2);border-radius:20px;padding:3px 12px">${esc(k.word)} <b>${k.weight}</b></span>`;}
+  h+=`</div>`;$("#hotBody").innerHTML=h;
+}
+function showGraph(g){
+  let h=`<h3 style="margin:14px 0 10px">🕸️ 新聞事件關聯（共享關鍵字）</h3>`;
+  if(!g.edges.length){h+="<div class='tip'>暫無強關聯事件。</div>";}
+  for(const e of g.edges){
+    const a=g.nodes.find(n=>n.id===e.source),b=g.nodes.find(n=>n.id===e.target);
+    if(!a||!b)continue;
+    h+=`<div class="card" style="margin-bottom:8px"><div class="ctop"><span class="chip cat">${esc(a.category)}</span><span class="chip evt">🔗</span><span class="chip cat">${esc(b.category)}</span></div><div style="font-size:13px"><b>${esc(a.repr)}</b> <span style="color:var(--muted)">⇄</span> <b>${esc(b.repr)}</b></div><div class="kws">${e.shared.map(s=>`<span class="kw">${esc(s)}</span>`).join("")}</div></div>`;
+  }
+  $("#hotBody").innerHTML=h;
+}
+
+// ---------- AI 研究 ----------
+async function openResearch(cid){
+  const r=await postj("/api/research?cluster_id="+cid,{});
+  if(r.error){toast(r.error);return;}
+  $("#resTitle").textContent="🔍 "+r.repr;
+  $("#resMeta").textContent=`分類：${r.category} · 相關報導 ${r.size} 篇 · 來源 ${r.sources.length} 家 · 關鍵字 ${r.keywords.slice(0,6).join("、")}`;
+  let h="";
+  h+=sec("📌 事件起因（最早報導）",r.cause);
+  h+=sec("🔄 最新進展",r.latest);
+  h+=sec("👥 各方觀點",r.views.map(v=>`<div style="margin:6px 0"><b>${esc(v.source)}：</b>${esc(v.title)}<div class="tip">${esc(v.summary)}</div></div>`).join(""));
+  h+=`<div class="sec"><h4>🕒 時間軸</h4><div class="timeline">${r.timeline.map(t=>`<div class="tl-item"><div class="tm">${esc(t.time)} · ${esc(t.source)}</div><div>${esc(t.title)}</div></div>`).join("")}</div></div>`;
+  h+=sec("💥 影響",r.impact.map(i=>`• ${esc(i)}`).join("<br>"));
+  h+=sec("🔭 後續可能發展",r.outlook);
+  h+=sec("📋 事件簡報（多源合成）",r.briefing);
+  h+=`<div class="tip" style="margin-top:10px">相關報導：${r.articles.map((a,i)=>`<a href="${esc(a.link)}" target="_blank">[${i+1}]${esc(a.source)}</a>`).join("  ")}</div>`;
+  $("#resBody").innerHTML=h;
+  openModal("mResearch");
+}
+function sec(t,b){return `<div class="sec"><h4>${t}</h4><div class="body">${b}</div></div>`;}
+
+// ---------- 統計 ----------
+async function openStats(){
+  const s=await getj("/api/stats");
+  let h=`<div class="kpi">
+    <div class="k"><b>${s.total}</b><span>累計新聞</span></div>
+    <div class="k"><b>${s.source_count}</b><span>新聞來源</span></div>
+    <div class="k"><b>${s.avg_hot_now}</b><span>當前平均熱度</span></div>
+    <div class="k"><b style="color:${s.avg_hot_now>=s.avg_hot_prev?'var(--green)':'var(--red)'}">${s.avg_hot_now-s.avg_hot_prev>=0?'+':''}${(s.avg_hot_now-s.avg_hot_prev).toFixed(1)}</b><span>熱度變化</span></div>
+  </div>`;
+  // 每日數量 + 成長曲線
+  const maxd=Math.max(1,...s.daily.map(d=>d.count));
+  const bars=s.daily.map(d=>`<div class="bar"><div class="lab">${d.date.slice(5)}</div><div class="track"><div class="fill" style="width:${d.count/maxd*100}%"></div></div><div class="val">${d.count}</div></div>`).join("");
+  // 累積曲線 (SVG)
+  let cum=0;const pts=s.daily.map(d=>{cum+=d.count;return cum;});
+  const maxc=Math.max(1,...pts);const W=420,H=120;
+  const line=pts.map((v,i)=>`${(i/(Math.max(1,s.daily.length-1)))*W},${H-(v/maxc)*H}`).join(" ");
+  const growth=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="background:#f8fafd;border-radius:10px"><polyline points="${line}" fill="none" stroke="#2563eb" stroke-width="2.5"/><text x="6" y="14" fill="#6b7686" font-size="11">累積 ${cum} 篇</text></svg>`;
+  // 類別比例
+  const maxc2=Math.max(1,...s.category_ratio.map(d=>d.count));
+  const cats=s.category_ratio.map(d=>`<div class="bar"><div class="lab">${esc(d.category)}</div><div class="track"><div class="fill" style="width:${d.count/maxc2*100}%;background:#16a34a"></div></div><div class="val">${d.count}</div></div>`).join("");
+  // 關鍵字趨勢
+  const maxk=Math.max(1,...s.keywords.map(d=>d.count));
+  const kws=s.keywords.map(d=>`<div class="bar"><div class="lab">${esc(d.word)}</div><div class="track"><div class="fill" style="width:${d.count/maxk*100}%;background:#f59e0b"></div></div><div class="val">${d.count}</div></div>`).join("");
+  h+=`<div class="stats-grid">
+    <div class="stat-box full"><h4>📈 每日新聞數量 / 成長曲線（近 14 天）</h4>${bars}${growth}</div>
+    <div class="stat-box"><h4>🗂 各類別新聞比例</h4>${cats}</div>
+    <div class="stat-box"><h4>🔑 關鍵字趨勢（近 7 天）</h4>${kws}</div>
+  </div>`;
+  $("#statBody").innerHTML=h;
+  openModal("mStat");
+}
+
+// ---------- 筆記/標籤 ----------
+let noteId=0;
+function openNote(id){
+  noteId=id;
+  postj("/api/news/action",{id,action:"read",on:true}); // 打開即標記已讀
+  // 讀取現有
+  getj("/api/news?limit=1&offset=0").then(()=>{});
+  $("#noteBody").innerHTML=`<div style="display:grid;gap:10px;margin-top:10px">
+    <label style="font-size:12px;color:var(--muted)">個人筆記</label>
+    <textarea id="nt" rows="4" placeholder="寫下你的看法…" style="padding:10px;border:1px solid var(--line);border-radius:8px;width:100%;resize:vertical"></textarea>
+    <label style="font-size:12px;color:var(--muted)">標籤（逗號分隔）</label>
+    <input id="tg" placeholder="例如：重要, 跟進, 投資" style="padding:9px;border:1px solid var(--line);border-radius:8px;width:100%">
+    <button class="btn" onclick="saveNote()">儲存</button>
+  </div>`;
+  openModal("mNote");
+}
+async function saveNote(){
+  const note=$("#nt").value.trim();
+  const tags=$("#tg").value.split(",").map(s=>s.trim()).filter(Boolean);
+  await postj("/api/news/action",{id:noteId,action:"note",value:note});
+  await postj("/api/news/action",{id:noteId,action:"tag",value:tags});
+  toast("已儲存筆記與標籤"); closeModal("mNote");
+}
+
+// ---------- 新增來源 ----------
+function openAddFeed(){openModal("mFeed");}
+async function addFeed(){
+  const name=$("#fdName").value.trim(),url=$("#fdUrl").value.trim(),cat=$("#fdCat").value.trim()||"自訂分類";
+  if(!url){toast("請填寫 RSS 網址");return;}
+  await postj("/api/feeds",{name,url,category:cat});
+  toast("已新增，重新採集中…"); closeModal("mFeed");
+  setTimeout(()=>{forceRefresh();},500);
+}
+
+// ---------- 即時更新 ----------
+async function poll(){
+  const s=await getj("/api/status");
+  $("#syncT").textContent=s.last_sync_iso.split(" ")[1]||s.last_sync_iso;
+  const live=$("#live");
+  if(s.breaking>0){ live.classList.add("alert"); $("#syncT").parentElement.innerHTML=`🚨 重大新聞更新<br><b>${s.breaking} 則突發</b>`; banner(`🚨 重大新聞更新：${s.breaking} 則突發新聞`); }
+  else { live.classList.remove("alert"); }
+  if(s.last_cycle_new>0 && state.cat==="全部" && !state.q){ loadNews(); loadSidebar(); }
+}
+let bannerTimer;
+function banner(m){const b=$("#banner");b.textContent=m;b.classList.add("show");clearTimeout(bannerTimer);bannerTimer=setTimeout(()=>b.classList.remove("show"),6000);}
+async function forceRefresh(){ toast("正在重新採集真實新聞…"); const s=await postj("/api/refresh",{}); if(s.error){toast("採集失敗："+s.error);return;} await loadSidebar(); await loadHotTabs(); await loadNews(); toast("已更新："+s.last_cycle_new+" 則新新聞"); }
+
+// ---------- modal ----------
+function openModal(id){$("#"+id).classList.add("open");}
+function closeModal(id){$("#"+id).classList.remove("open");}
+document.querySelectorAll(".modal").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)m.classList.remove("open");}));
+
+function share(link){ if(navigator.clipboard)navigator.clipboard.writeText(link); toast("已複製新聞連結"); }
+
+// ---------- init ----------
+async function init(){
+  await loadSidebar();
+  await loadHotTabs();
+  await loadNews();
+  poll();
+  setInterval(poll, 30000);
+}
+init();
+</script>
+</body>
+</html>

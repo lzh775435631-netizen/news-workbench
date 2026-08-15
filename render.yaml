@@ -1,0 +1,24 @@
+# Render 部署配置（声明式）
+# 用法：在 Render 后台 New > Blueprint > 连接本仓库，Render 会按此文件创建服务。
+# 或直接 New > Web Service > 连接仓库，启动时填 startCommand: python app.py 也可。
+services:
+  - type: web
+    name: news-workbench
+    runtime: python
+    plan: free
+    region: oregon            # 美西节点，Google News RSS 延迟最低
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /
+    envVars:
+      # 选填：降低采集频率以节省免费实例算力（默认读取 feeds.json 的 15 分钟）
+      - key: FETCH_INTERVAL_MINUTES
+        value: "15"
+      # 选填：配置后 AI 研究/简报改用 LLM 生成（OpenAI 兼容接口）
+      # - key: LLM_API_KEY
+      #   sync: false
+      # - key: LLM_BASE_URL
+      #   value: https://api.openai.com/v1
+      # - key: LLM_MODEL
+      #   value: gpt-4o-mini

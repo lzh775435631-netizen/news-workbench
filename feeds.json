@@ -1,0 +1,68 @@
+{
+  "fetch_interval_minutes": 15,
+  "max_articles": 6000,
+  "sources": [
+    {"id": "gn_nation", "name": "Google新闻·国内", "category": "国内", "type": "gnews_topic", "topic": "NATION", "lang": "zh", "weight": 1.0},
+    {"id": "gn_world", "name": "Google新闻·国际", "category": "国际", "type": "gnews_topic", "topic": "WORLD", "lang": "zh", "weight": 1.0},
+    {"id": "gn_business", "name": "Google新闻·财经", "category": "财经", "type": "gnews_topic", "topic": "BUSINESS", "lang": "zh", "weight": 1.0},
+    {"id": "gn_tech", "name": "Google新闻·科技", "category": "科技", "type": "gnews_topic", "topic": "TECHNOLOGY", "lang": "zh", "weight": 1.0},
+    {"id": "gn_science", "name": "Google新闻·科学", "category": "科学", "type": "gnews_topic", "topic": "SCIENCE", "lang": "zh", "weight": 1.0},
+    {"id": "gn_sports", "name": "Google新闻·体育", "category": "体育", "type": "gnews_topic", "topic": "SPORTS", "lang": "zh", "weight": 1.0},
+    {"id": "gn_ent", "name": "Google新闻·娱乐", "category": "娱乐", "type": "gnews_topic", "topic": "ENTERTAINMENT", "lang": "zh", "weight": 1.0},
+    {"id": "gn_health", "name": "Google新闻·健康", "category": "健康", "type": "gnews_topic", "topic": "HEALTH", "lang": "zh", "weight": 1.0},
+
+    {"id": "gn_ai", "name": "Google新闻·人工智能", "category": "AI", "type": "gnews_search", "q": "人工智能", "lang": "zh", "weight": 1.1},
+    {"id": "gn_mil", "name": "Google新闻·军事", "category": "军事", "type": "gnews_search", "q": "军事", "lang": "zh", "weight": 1.0},
+    {"id": "gn_auto", "name": "Google新闻·新能源汽车", "category": "汽车", "type": "gnews_search", "q": "新能源汽车", "lang": "zh", "weight": 1.0},
+    {"id": "gn_house", "name": "Google新闻·房地产", "category": "房产", "type": "gnews_search", "q": "房地产", "lang": "zh", "weight": 1.0},
+    {"id": "gn_net", "name": "Google新闻·互联网", "category": "互联网", "type": "gnews_search", "q": "互联网", "lang": "zh", "weight": 1.0},
+    {"id": "gn_biz", "name": "Google新闻·企业", "category": "公司/商业", "type": "gnews_search", "q": "企业", "lang": "zh", "weight": 1.0},
+    {"id": "gn_soc", "name": "Google新闻·社会", "category": "社会", "type": "gnews_search", "q": "社会", "lang": "zh", "weight": 1.0},
+    {"id": "gn_culture", "name": "Google新闻·文化", "category": "文化", "type": "gnews_search", "q": "文化", "lang": "zh", "weight": 1.0},
+    {"id": "gn_econ", "name": "Google新闻·经济", "category": "经济", "type": "gnews_search", "q": "经济", "lang": "zh", "weight": 1.0},
+    {"id": "gn_pol", "name": "Google新闻·政治", "category": "政治", "type": "gnews_search", "q": "政治", "lang": "zh", "weight": 1.0},
+
+    {"id": "bbc_world", "name": "BBC World", "category": "国际", "type": "rss", "url": "https://feeds.bbci.co.uk/news/world/rss.xml", "lang": "en", "weight": 1.2},
+    {"id": "guardian_world", "name": "The Guardian World", "category": "国际", "type": "rss", "url": "https://www.theguardian.com/world/rss", "lang": "en", "weight": 1.1},
+    {"id": "aljazeera", "name": "Al Jazeera", "category": "国际", "type": "rss", "url": "https://www.aljazeera.com/xml/rss/all.xml", "lang": "en", "weight": 1.1},
+    {"id": "npr", "name": "NPR", "category": "国际", "type": "rss", "url": "https://feeds.npr.org/1001/rss.xml", "lang": "en", "weight": 1.0},
+
+    {"id": "techcrunch", "name": "TechCrunch", "category": "科技", "type": "rss", "url": "https://techcrunch.com/feed/", "lang": "en", "weight": 1.1},
+    {"id": "theverge", "name": "The Verge", "category": "科技", "type": "rss", "url": "https://www.theverge.com/rss/index.xml", "lang": "en", "weight": 1.1},
+    {"id": "arstech", "name": "Ars Technica", "category": "科技", "type": "rss", "url": "http://feeds.arstechnica.com/arstechnica/index", "lang": "en", "weight": 1.0},
+    {"id": "wired", "name": "Wired", "category": "科技", "type": "rss", "url": "https://www.wired.com/feed/rss", "lang": "en", "weight": 1.0},
+
+    {"id": "mit_ai", "name": "MIT Tech Review AI", "category": "AI", "type": "rss", "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed", "lang": "en", "weight": 1.2},
+    {"id": "openai_blog", "name": "OpenAI Blog", "category": "AI", "type": "rss", "url": "https://openai.com/blog/rss.xml", "lang": "en", "weight": 1.2},
+    {"id": "google_ai", "name": "Google AI Blog", "category": "AI", "type": "rss", "url": "https://blog.google/technology/ai/rss/", "lang": "en", "weight": 1.1},
+    {"id": "hn", "name": "Hacker News", "category": "互联网", "type": "rss", "url": "https://hnrss.org/frontpage", "lang": "en", "weight": 1.0},
+
+    {"id": "cnbc", "name": "CNBC", "category": "财经", "type": "rss", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "lang": "en", "weight": 1.1},
+    {"id": "marketwatch", "name": "MarketWatch", "category": "财经", "type": "rss", "url": "https://www.marketwatch.com/rss/topstories", "lang": "en", "weight": 1.0},
+    {"id": "bbc_business", "name": "BBC Business", "category": "公司/商业", "type": "rss", "url": "https://feeds.bbci.co.uk/news/business/rss.xml", "lang": "en", "weight": 1.0},
+
+    {"id": "bbc_sport", "name": "BBC Sport", "category": "体育", "type": "rss", "url": "https://feeds.bbci.co.uk/sport/rss.xml", "lang": "en", "weight": 1.0},
+    {"id": "espn", "name": "ESPN", "category": "体育", "type": "rss", "url": "https://www.espn.com/espn/rss/news", "lang": "en", "weight": 1.0},
+
+    {"id": "bbc_ent", "name": "BBC Entertainment", "category": "娱乐", "type": "rss", "url": "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml", "lang": "en", "weight": 1.0},
+    {"id": "variety", "name": "Variety", "category": "娱乐", "type": "rss", "url": "https://variety.com/feed/", "lang": "en", "weight": 1.0},
+    {"id": "rollingstone", "name": "Rolling Stone", "category": "娱乐", "type": "rss", "url": "https://www.rollingstone.com/feed/", "lang": "en", "weight": 1.0},
+
+    {"id": "guardian_culture", "name": "The Guardian Culture", "category": "文化", "type": "rss", "url": "https://www.theguardian.com/culture/rss", "lang": "en", "weight": 1.0},
+    {"id": "artforum", "name": "Artforum", "category": "文化", "type": "rss", "url": "https://www.artforum.com/feed/", "lang": "en", "weight": 0.9},
+
+    {"id": "bbc_health", "name": "BBC Health", "category": "健康", "type": "rss", "url": "https://feeds.bbci.co.uk/news/health/rss.xml", "lang": "en", "weight": 1.0},
+
+    {"id": "defensenews", "name": "Defense News", "category": "军事", "type": "rss", "url": "https://www.defensenews.com/arc/outboundfeeds/rss/", "lang": "en", "weight": 1.1},
+    {"id": "twz", "name": "The War Zone", "category": "军事", "type": "rss", "url": "https://www.twz.com/feed", "lang": "en", "weight": 1.0},
+
+    {"id": "cardriver", "name": "Car and Driver", "category": "汽车", "type": "rss", "url": "https://www.caranddriver.com/rss/all", "lang": "en", "weight": 1.0},
+    {"id": "housingwire", "name": "HousingWire", "category": "房产", "type": "rss", "url": "https://www.housingwire.com/feed/", "lang": "en", "weight": 1.0},
+
+    {"id": "guardian_soc", "name": "The Guardian Society", "category": "社会", "type": "rss", "url": "https://www.theguardian.com/society/rss", "lang": "en", "weight": 1.0},
+    {"id": "bbc_uk", "name": "BBC UK", "category": "社会", "type": "rss", "url": "https://feeds.bbci.co.uk/news/uk/rss.xml", "lang": "en", "weight": 1.0},
+
+    {"id": "bbc_pol", "name": "BBC Politics", "category": "政治", "type": "rss", "url": "https://feeds.bbci.co.uk/news/politics/rss.xml", "lang": "en", "weight": 1.0},
+    {"id": "guardian_pol", "name": "The Guardian Politics", "category": "政治", "type": "rss", "url": "https://www.theguardian.com/politics/rss", "lang": "en", "weight": 1.0}
+  ]
+}
