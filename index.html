@@ -128,14 +128,50 @@ button{font-family:inherit;cursor:pointer}
 .banner.show{display:block;animation:rise .25s}
 .tip{font-size:11px;color:var(--muted);margin-top:4px}
 @media(max-width:900px){.layout{grid-template-columns:1fr}.sidebar{position:relative;height:auto;top:0;border-right:none;border-bottom:1px solid var(--line)}.brief-grid,.stats-grid{grid-template-columns:1fr}}
-</style>
+.rb-head{display:flex;justify-content:space-between;align-items:baseline;margin:18px 2px 10px}
+.rb-head h3{margin:0;font-size:16px}
+.rb-head .sub{color:var(--muted);font-size:12px}
+.ws{display:inline-flex;align-items:center;gap:4px;font-weight:700;font-size:13px;padding:2px 10px;border-radius:20px;background:#fff1f3;color:var(--red)}
+.research-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
+.research-card h4{margin:0 0 6px;font-size:15px;line-height:1.4}
+.research-card .why{color:#45506a;font-size:13px;line-height:1.6;margin:6px 0}
+.research-card .angle{background:#f8fafd;border-left:3px solid var(--blue);padding:8px 10px;border-radius:8px;font-size:13px;margin:8px 0;color:#37425c}
+.research-card .mini{font-size:12px;color:var(--muted);margin:4px 0}
+.arg-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow)}
+.arg-card .ac-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.arg-card .content{font-weight:600;font-size:14px;line-height:1.5}
+.arg-card .exp{color:#45506a;font-size:13px;line-height:1.6;margin:6px 0}
+.ev-item{border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin:6px 0;font-size:12.5px;background:#fbfdff}
+.ev-item .et{font-weight:600}
+.ev-unverified{color:var(--amber);font-weight:700}
+.pill{font-size:11px;padding:1px 8px;border-radius:20px;font-weight:600}
+.pill.strong{background:#fde8ee;color:var(--red)}
+.pill.mid{background:#fff3e0;color:var(--amber)}
+.pill.weak{background:#eef2fb;color:var(--muted)}
+.pill.cred-hi{background:#e7f6ec;color:var(--green)}
+.pill.cred-mid{background:#eef2fb;color:var(--blue2)}
+.pill.cred-lo{background:#fde8ee;color:var(--red)}
+.pill.cred-w{background:#fff3e0;color:var(--amber)}
+.topic-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow)}
+.topic-card h4{margin:0 0 4px;font-size:14px}
+.searchres{border-bottom:1px dashed var(--line);padding:9px 2px}
+.searchres .t{font-weight:600;font-size:14px}
+.searchres .s{color:var(--muted);font-size:12px;margin-top:2px}
+.tagtype{font-size:11px;font-weight:700;padding:1px 8px;border-radius:6px;margin-right:6px}
+.tagtype.新聞{background:#eaf1ff;color:var(--blue2)}
+.tagtype.研究{background:#fde8ee;color:var(--red)}
+.tagtype.論點{background:#e7f6ec;color:var(--green)}
+.tagtype.選題{background:#fff3e0;color:var(--amber)}
+.libbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:14px}
+.libbar input,.libbar select{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff;color:var(--ink)}
+
 </head>
 <body>
 <div class="header">
   <div class="logo">新聞情報<span>工作台</span> · 最終版</div>
   <div class="searchbar">
-    <input id="q" placeholder="🔎 全文搜尋：關鍵字 / 標題 / 來源 / 標籤…" onkeydown="if(event.key==='Enter')applyFilters()">
-    <button class="btn" onclick="applyFilters()">搜尋</button>
+    <input id="q" placeholder="🔎 全文搜尋：新聞 / 研究 / 論點 / 選題…" onkeydown="if(event.key==='Enter')runSearch()">
+    <button class="btn" onclick="runSearch()">搜尋</button>
   </div>
   <div class="live" id="live">
     <span class="dot"></span>
@@ -160,6 +196,12 @@ button{font-family:inherit;cursor:pointer}
       <div class="cat special" data-cat="稍后看" onclick="pickCat('稍后看')">📌 稍後閱讀</div>
       <div class="cat special" data-cat="已读" onclick="pickCat('已读')">✓ 已讀</div>
       <div class="cat special" data-cat="未读" onclick="pickCat('未读')">◌ 未讀</div>
+    </div>
+    <div class="side-sec">
+      <div class="side-title">研究工作台</div>
+      <div class="cat special" onclick="openResearchBoard()">🔬 研究工作台</div>
+      <div class="cat special" onclick="openArgLib()">💡 論點庫</div>
+      <div class="cat special" onclick="openTopicLib()">📚 選題庫</div>
     </div>
     <div class="side-sec">
       <div class="side-title">RSS / API 動態消息</div>
@@ -251,6 +293,52 @@ button{font-family:inherit;cursor:pointer}
     <input id="fdCat" placeholder="分類 (如：自訂分類)" style="padding:9px;border:1px solid var(--line);border-radius:8px;width:100%">
     <button class="btn" onclick="addFeed()">新增並採集</button>
   </div>
+</div></div>
+
+<!-- 研究工作台 -->
+<div class="modal" id="mResearchBoard"><div class="sheet" style="max-width:1060px">
+  <button class="close" onclick="closeModal('mResearchBoard')">✕ 關閉</button>
+  <h2>🔬 論點研究工作台</h2>
+  <div class="tip">新聞 → 事件 → 現象 → 核心問題 → 論點 → 證據 → 反方觀點 → 我的觀點 → 選題 → 文章</div>
+  <div id="rbBody"></div>
+</div></div>
+
+<!-- 研究詳情 -->
+<div class="modal" id="mResearchDetail"><div class="sheet research" style="max-width:980px">
+  <button class="close" onclick="closeModal('mResearchDetail')">✕ 關閉</button>
+  <div id="rdBody"></div>
+</div></div>
+
+<!-- 論點庫 -->
+<div class="modal" id="mArgLib"><div class="sheet" style="max-width:960px">
+  <button class="close" onclick="closeModal('mArgLib')">✕ 關閉</button>
+  <h2>💡 論點庫</h2>
+  <div class="libbar">
+    <input id="argQ" placeholder="搜尋論點…" onkeydown="if(event.key==='Enter')loadArgLib()">
+    <select id="argStrength"><option value="">全部強度</option><option>強</option><option>中</option><option>弱</option></select>
+    <select id="argCred"><option value="">全部可信度</option><option>高</option><option>中</option><option>低</option><option>待驗證</option></select>
+    <button class="btn small" onclick="loadArgLib()">篩選</button>
+  </div>
+  <div id="argBody"></div>
+</div></div>
+
+<!-- 選題庫 -->
+<div class="modal" id="mTopicLib"><div class="sheet" style="max-width:960px">
+  <button class="close" onclick="closeModal('mTopicLib')">✕ 關閉</button>
+  <h2>📚 選題庫</h2>
+  <div class="libbar">
+    <input id="topicQ" placeholder="搜尋選題…" onkeydown="if(event.key==='Enter')loadTopicLib()">
+    <select id="topicStatus"><option value="">全部狀態</option><option>待研究</option><option>研究中</option><option>已完成</option><option>已轉文章</option></select>
+    <button class="btn small" onclick="loadTopicLib()">篩選</button>
+  </div>
+  <div id="topicBody"></div>
+</div></div>
+
+<!-- 全站搜尋 -->
+<div class="modal" id="mSearch"><div class="sheet" style="max-width:820px">
+  <button class="close" onclick="closeModal('mSearch')">✕ 關閉</button>
+  <h2>🔎 全站搜尋</h2>
+  <div id="searchBody"></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
@@ -539,6 +627,217 @@ function closeModal(id){$("#"+id).classList.remove("open");}
 document.querySelectorAll(".modal").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)m.classList.remove("open");}));
 
 function share(link){ if(navigator.clipboard)navigator.clipboard.writeText(link); toast("已複製新聞連結"); }
+
+// ---------- 研究工作台 ----------
+let curRid = 0;
+function strengthPill(s){const m={"強":"strong","中":"mid","弱":"weak"};return `<span class="pill ${m[s]||'mid'}">${s}</span>`;}
+function credPill(c){const m={"高":"cred-hi","中":"cred-mid","低":"cred-lo","待驗證":"cred-w"};return `<span class="pill ${m[c]||'cred-mid'}">${c}</span>`;}
+
+async function openResearchBoard(){ const b=await getj("/api/research/board"); renderBoard(b); openModal("mResearchBoard"); }
+function renderBoard(b){
+  let h=`<div class="kpi" style="margin:10px 0">
+    <div class="k"><b>${b.counts.research}</b><span>研究</span></div>
+    <div class="k"><b>${b.counts.argument}</b><span>論點</span></div>
+    <div class="k"><b>${b.counts.topic}</b><span>選題</span></div>
+  </div>`;
+  h+=`<div class="rb-head"><h3>🔬 今日值得研究</h3><div class="sub">綜合熱度/重要度/突發/寫作價值，已研究者不重複推薦</div></div>`;
+  if(!b.today_worthy.length) h+=`<div class="empty"><div class="big">🗞️</div>暫無候選新聞</div>`;
+  for(const n of b.today_worthy){
+    h+=`<div class="research-card">
+      <div class="ctop"><span class="chip cat">${esc(n.category)}</span><span class="chip" style="background:#f0f3f9;color:#46536e">${esc(n.source)}</span><span class="ws">🔥 寫作價值 ${n.writing_score}</span></div>
+      <h4><a href="${esc(n.link)}" target="_blank">${esc(n.title)}</a></h4>
+      <div class="why"><b>為什麼值得研究：</b>${esc(n.why)}</div>
+      <div class="angle"><b>推薦研究角度：</b>${esc(n.angle)}</div>
+      <div class="mini"><b>潛在選題：</b>${n.topics.map(t=>esc(t.title)).join(" ｜ ")}</div>
+      <div style="margin-top:8px"><button class="btn small" onclick="startResearch(${n.id},${n.cluster_id||0})">🚀 開始研究</button></div>
+    </div>`;
+  }
+  h+=rbSection("📌 我的研究中", b.studying);
+  h+=rbSection("⚠️ 待補證據", b.need_evidence);
+  h+=rbSection("🔍 待驗證", b.need_verify);
+  h+=rbSection("✅ 已完成 / 已轉文章", b.done);
+  h+=`<div class="rb-head"><h3>💡 今日選題機會</h3><div class="sub">新聞本身不是唯一重點的角度</div></div>`;
+  if(!b.topic_opportunities.length) h+=`<div class="tip">暫無</div>`;
+  for(const o of b.topic_opportunities){
+    const ang=esc(o.angle).replace(/'/g,"\\'");
+    h+=`<div class="topic-card">
+      <h4>${ang}</h4>
+      <div class="mini">相關新聞：${esc(o.news_title)} · 寫作價值 ${o.writing_score}</div>
+      <div style="margin-top:6px"><button class="btn small" onclick="addTopicOpportunity(${o.news_id},${o.cluster_id||0},'${ang}')">＋ 加入選題庫</button></div>
+    </div>`;
+  }
+  $("#rbBody").innerHTML=h;
+}
+function rbSection(title, items){
+  if(!items||!items.length) return "";
+  let h=`<div class="rb-head"><h3>${title}（${items.length}）</h3></div>`;
+  for(const r of items){
+    h+=`<div class="research-card" style="cursor:pointer" onclick="openResearchDetail(${r.id})">
+      <div class="ctop"><span class="chip" style="background:#eaf1ff;color:var(--blue2)">${esc(r.status)}</span><span class="ws">🔥 ${r.writing_score}</span></div>
+      <h4>${esc(r.title)}</h4>
+      <div class="mini">更新：${esc(r.updated_at||"")}</div>
+    </div>`;
+  }
+  return h;
+}
+async function startResearch(news_id, cluster_id){
+  toast("AI 研究中…");
+  const r=await postj("/api/research/ai",{news_id, cluster_id});
+  if(r.error){toast("失敗："+r.error);return;}
+  openResearchDetail(r.id);
+}
+async function openResearchDetail(id){
+  const d=await getj("/api/research/detail?id="+id);
+  if(d.error){toast(d.error);return;}
+  renderResearchDetail(d); openModal("mResearchDetail");
+}
+function renderResearchDetail(d){
+  const r=d.research; curRid=r.id;
+  let h=`<div class="ctop" style="margin-bottom:6px">
+    <span class="chip" style="background:#eaf1ff;color:var(--blue2)">${esc(r.status)}</span>
+    <span class="ws">🔥 寫作價值 ${r.writing_score}</span>
+    <select id="rdStatus" onchange="updateResearchStatus(${r.id},this.value)" style="padding:4px 8px;border-radius:8px;border:1px solid var(--line)">
+      ${["待研究","研究中","待补证据","待验证","已完成","已转文章"].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join("")}
+    </select>
+  </div>`;
+  h+=`<h2 style="margin:4px 0 2px">${esc(r.title)}</h2>`;
+  h+=`<div class="tip">寫作價值說明：${esc(r.writing_reason||"")}</div>`;
+  h+=sec("📌 發生了什麼？", esc(r.event||"無"));
+  h+=sec("💡 為什麼值得關注？", esc(r.why_matters||"無"));
+  h+=sec("❓ 核心問題", esc(r.core_question||"無"));
+  h+=`<div class="sec"><h4>✍️ 我的觀點</h4><textarea id="rdMyView" rows="3" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;resize:vertical">${esc(r.my_view||"")}</textarea><div style="margin-top:6px"><button class="btn small" onclick="saveMyView(${r.id})">儲存觀點</button></div></div>`;
+  h+=`<div class="rb-head"><h3>🧩 核心論點（${d.arguments.length}）</h3><button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="addArgument(${r.id})">＋ 新增論點</button></div>`;
+  for(const a of d.arguments){
+    h+=`<div class="arg-card">
+      <div class="ac-top"><div class="content">${esc(a.content)}</div><div>${strengthPill(a.strength)} ${credPill(a.credibility)}</div></div>
+      <div class="exp">${esc(a.explanation||"")}</div>
+      <div class="mini"><b>支持證據：</b></div>
+      ${(a.evidence&&a.evidence.length)?a.evidence.map(evItem).join(""):`<div class="tip">尚無證據，請補充並自行核實 ⚠️</div>`}
+      <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted);margin-top:4px" onclick="addEvidence(${a.id})">＋ 證據</button>
+      <div class="mini" style="margin-top:6px"><b>反方觀點：</b></div>
+      <textarea id="cv_${a.id}" rows="2" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;resize:vertical">${esc(a.counter_view||"")}</textarea>
+      <div class="mini" style="margin-top:4px"><b>我的回應：</b></div>
+      <textarea id="mr_${a.id}" rows="2" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;resize:vertical">${esc(a.my_response||"")}</textarea>
+      <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn small" onclick="saveArgViews(${a.id})">儲存反方/回應</button>
+        <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="addArgumentFromArg(${r.id},${a.id})">＋ 轉選題</button>
+        <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="editArgument(${a.id})">編輯</button>
+        <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--red)" onclick="delArgument(${a.id})">刪除</button>
+      </div>
+    </div>`;
+  }
+  if(r.controversies&&r.controversies.length) h+=sec("🧨 爭議點", r.controversies.map(x=>"• "+esc(x)).join("<br>"));
+  if(r.counterintuitive&&r.counterintuitive.length) h+=sec("🔄 反直覺發現", r.counterintuitive.map(x=>"• "+esc(x)).join("<br>"));
+  if(r.extension_questions&&r.extension_questions.length) h+=sec("🔭 延伸問題", r.extension_questions.map(x=>"• "+esc(x)).join("<br>"));
+  h+=`<div class="rb-head"><h3>📚 潛在選題（${d.topics.length}）</h3></div>`;
+  for(const t of d.topics){
+    h+=`<div class="topic-card">
+      <h4>${esc(t.title)}</h4>
+      <div class="mini">核心問題：${esc(t.core_question||"")}</div>
+      <div class="mini">初步觀點：${esc(t.initial_view||"")} ｜ 寫作價值 ${t.score} ｜ ${esc(t.status)}</div>
+      <div style="margin-top:6px"><button class="btn small" onclick="openTopicLib()">📚 查看選題庫</button></div>
+    </div>`;
+  }
+  $("#rdBody").innerHTML=h;
+}
+function evItem(ev){
+  const v = ev.verified? `<span class="pill cred-hi">已驗證</span>` : `<span class="ev-unverified">⚠️ 待驗證</span>`;
+  const link = ev.source_url?` · <a href="${esc(ev.source_url)}" target="_blank">連結</a>`:"";
+  return `<div class="ev-item"><div class="et">[${esc(ev.type)}] ${esc(ev.title)} ${v}</div><div>${esc(ev.content||"")}</div><div class="mini">來源：${esc(ev.source||"")}${link}</div></div>`;
+}
+async function saveMyView(id){ await postj("/api/research/update",{id, my_view:$("#rdMyView").value}); toast("已儲存觀點"); }
+async function updateResearchStatus(id,st){ await postj("/api/research/status",{id,status:st}); toast("狀態：「"+st+"」"); }
+async function saveArgViews(aid){ await postj("/api/arguments/update",{id:aid, counter_view:$("#cv_"+aid).value, my_response:$("#mr_"+aid).value}); toast("已儲存"); }
+async function delArgument(aid){ if(!confirm("確定刪除此論點？"))return; await postj("/api/arguments/delete",{id:aid}); toast("已刪除"); if(curRid) openResearchDetail(curRid); }
+function editArgument(aid){ const c=prompt("編輯論點內容："); if(!c)return; postj("/api/arguments/update",{id:aid,content:c}); toast("已更新"); if(curRid) setTimeout(()=>openResearchDetail(curRid),200); }
+async function addArgument(rid){
+  const content=prompt("論點內容："); if(!content)return;
+  const explanation=prompt("論證與依據：")||"";
+  const r=await postj("/api/arguments/create",{research_id:rid,content,explanation,strength:"中",credibility:"待驗證"});
+  if(r.ok){toast("已新增論點"); openResearchDetail(curRid);}
+}
+async function addArgumentFromArg(rid,aid){
+  const title=prompt("轉為選題的標題：")||""; if(!title)return;
+  const cq=prompt("選題核心問題：")||"";
+  const r=await postj("/api/topics/create",{research_id:rid,title,core_question:cq,score:70});
+  if(r.ok){toast("已加入選題庫"); openTopicLib();}
+}
+async function addEvidence(aid){
+  const title=prompt("證據標題/來源："); if(!title)return;
+  const type=prompt("類型（事實/數據/案例/新聞/研究/歷史/其他）：","其他")||"其他";
+  const content=prompt("證據內容：")||"";
+  const source=prompt("出處：")||"";
+  const source_url=prompt("來源連結（可空）：")||"";
+  const r=await postj("/api/evidence/create",{argument_id:aid,type,title,content,source,source_url,verified:0});
+  if(r.ok){toast("已新增證據，請自行核實 ⚠️"); openResearchDetail(curRid);}
+}
+async function addTopicOpportunity(news_id,cluster_id,angle){
+  const title=prompt("選題標題：",angle)||angle; if(!title)return;
+  const cq=prompt("選題核心問題：")||"";
+  const rc=await postj("/api/research/create",{news_id:news_id||null, cluster_id:cluster_id||null, title});
+  if(!rc.ok){toast("建立研究失敗");return;}
+  const r=await postj("/api/topics/create",{research_id:rc.id,title,core_question:cq,score:70});
+  if(r.ok)toast("已加入選題庫");
+}
+async function openArgLib(){ await loadArgLib(); openModal("mArgLib"); }
+async function loadArgLib(){
+  const q=$("#argQ").value, s=$("#argStrength").value, c=$("#argCred").value;
+  const d=await getj(`/api/arguments?q=${encodeURIComponent(q)}&strength=${encodeURIComponent(s)}&credibility=${encodeURIComponent(c)}`);
+  renderArgLib(d.arguments);
+}
+function renderArgLib(list){
+  if(!list.length){$("#argBody").innerHTML=`<div class="empty">暫無論點</div>`;return;}
+  let h="";
+  for(const a of list){
+    h+=`<div class="arg-card">
+      <div class="ac-top"><div class="content">${esc(a.content)}</div><div>${strengthPill(a.strength)} ${credPill(a.credibility)}</div></div>
+      <div class="exp">${esc(a.explanation||"")}</div>
+      <div class="mini">來源新聞：${a.news_count} 篇 ｜ 關聯選題：${a.topic_count} ｜ 研究：<a href="#" onclick="openResearchDetail(${a.research_id});return false">${esc(a.research_title||'')}</a></div>
+      <div style="margin-top:6px;display:flex;gap:6px">
+        <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="editArgument(${a.id})">編輯</button>
+        <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--red)" onclick="delArgument(${a.id})">刪除</button>
+      </div>
+    </div>`;
+  }
+  $("#argBody").innerHTML=h;
+}
+async function openTopicLib(){ await loadTopicLib(); openModal("mTopicLib"); }
+async function loadTopicLib(){
+  const q=$("#topicQ").value, s=$("#topicStatus").value;
+  const d=await getj(`/api/topics?q=${encodeURIComponent(q)}&status=${encodeURIComponent(s)}`);
+  renderTopicLib(d.topics);
+}
+function renderTopicLib(list){
+  if(!list.length){$("#topicBody").innerHTML=`<div class="empty">暫無選題</div>`;return;}
+  let h="";
+  for(const t of list){
+    h+=`<div class="topic-card">
+      <h4>${esc(t.title)}</h4>
+      <div class="mini">核心問題：${esc(t.core_question||"")}</div>
+      <div class="mini">初步觀點：${esc(t.initial_view||"")}</div>
+      <div class="mini">寫作價值：${t.score} ｜ 狀態：${esc(t.status)} ｜ 關聯論點：${t.argument_count} ｜ 建立：${esc(t.created_at||"")}</div>
+      <div style="margin-top:6px;display:flex;gap:6px">
+        <button class="btn small ghost" style="background:#fff;border:1px solid var(--line);color:var(--muted)" onclick="editTopic(${t.id})">編輯</button>
+      </div>
+    </div>`;
+  }
+  $("#topicBody").innerHTML=h;
+}
+function editTopic(tid){ const title=prompt("選題標題："); if(!title)return; const cq=prompt("核心問題：")||""; postj("/api/topics/update",{id:tid,title,core_question:cq}); toast("已更新"); setTimeout(loadTopicLib,300); }
+async function runSearch(){
+  const q=$("#q").value.trim(); if(!q){toast("請輸入關鍵字");return;}
+  const d=await getj("/api/search?q="+encodeURIComponent(q));
+  renderSearch(d.results, q); openModal("mSearch");
+}
+function renderSearch(results,q){
+  if(!results.length){$("#searchBody").innerHTML=`<div class="empty">沒有符合「${esc(q)}」的結果</div>`;return;}
+  let h=`<div class="tip">全站搜尋「${esc(q)}」共 ${results.length} 筆：</div>`;
+  for(const r of results){
+    const act = (r.type==="新聞") ? "" : `openResearchDetail(${r.rid})`;
+    h+=`<div class="searchres" ${act?`style="cursor:pointer" onclick="${act}"`:""}><span class="tagtype ${r.type}">【${r.type}】</span><span class="t">${esc(r.title)}</span><div class="s">${esc(r.sub||"")}</div></div>`;
+  }
+  $("#searchBody").innerHTML=h;
+}
 
 // ---------- init ----------
 async function init(){
