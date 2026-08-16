@@ -15,7 +15,12 @@ from jieba import analyse
 jieba.setLogLevel(20)
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(BASE, "news.db")
+# 資料庫路徑：優先使用環境變數 DB_PATH（Render Persistent Disk 掛載時設為 /var/data/news.db）
+# 未設定時回退到專案目錄下的 news.db（本地開發 / Render 免費版臨時磁碟）
+DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE, "news.db"))
+# 自動建立資料庫所在目錄（Persistent Disk 掛載後即可直接寫入）
+os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
+DB = DB_PATH
 FEEDS = os.path.join(BASE, "feeds.json")
 PORT = int(os.environ.get("PORT", "8800"))
 
