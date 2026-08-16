@@ -27,6 +27,20 @@ button{font-family:inherit;cursor:pointer}
 .btn.small{padding:5px 9px;font-size:12px;border-radius:7px}
 .live{display:flex;align-items:center;gap:10px;white-space:nowrap;font-size:12px}
 .live .dot{width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.18);animation:pulse 2s infinite}
+.collector{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;cursor:pointer;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,.08)}
+.collector .cdot{width:9px;height:9px;border-radius:50%}
+.collector.ok .cdot{background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.18)}
+.collector.partial .cdot{background:#f59e0b;box-shadow:0 0 0 4px rgba(245,158,11,.18)}
+.collector.bad .cdot{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.18)}
+.kpis{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
+.kpis>div{flex:1;min-width:92px;background:#f4f7fc;border-radius:10px;padding:10px;text-align:center}
+.kpis b{display:block;font-size:20px;color:var(--blue2)}
+.kpis span{font-size:12px;color:#667}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.tbl th,.tbl td{border-bottom:1px solid #eef;padding:6px 8px;text-align:left}
+.tbl .warn{color:#b45309;background:#fff7ed}
+.warnbox{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;padding:8px 10px;border-radius:8px;font-size:12px;margin:6px 0}
+.muted{color:#889;font-size:12px}
 .live.alert .dot{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.2)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .live .meta{color:#9fb3d6;line-height:1.25}
@@ -220,6 +234,10 @@ button{font-family:inherit;cursor:pointer}
     <span class="dot"></span>
     <span class="meta">🟢 即時更新<br>最後同步：<b id="syncT">啟動中…</b></span>
   </div>
+  <div class="collector ok" id="collector" onclick="openCollector()" title="點擊查看採集狀態">
+    <span class="cdot"></span>
+    <span id="colMeta">採集中…</span>
+  </div>
   <button class="btn ghost" onclick="openBriefing()">📰 每日簡報</button>
   <button class="btn ghost" onclick="openHotspots()">🔥 熱點</button>
   <button class="btn ghost" onclick="openStats()">📊 統計</button>
@@ -325,6 +343,13 @@ button{font-family:inherit;cursor:pointer}
   <button class="close" onclick="closeModal('mNote')">✕ 關閉</button>
   <h2>📝 筆記與標籤</h2>
   <div id="noteBody"></div>
+</div></div>
+
+<!-- 採集狀態 -->
+<div class="modal" id="mCollector"><div class="sheet" style="max-width:900px">
+  <button class="close" onclick="closeModal('mCollector')">✕ 關閉</button>
+  <h2>🛰️ 新聞採集狀態</h2>
+  <div id="mCollectorBody"></div>
 </div></div>
 
 <!-- 新增來源 -->
@@ -674,10 +699,41 @@ async function poll(){
   if(s.breaking>0){ live.classList.add("alert"); $("#syncT").parentElement.innerHTML=`🚨 重大新聞更新<br><b>${s.breaking} 則突發</b>`; banner(`🚨 重大新聞更新：${s.breaking} 則突發新聞`); }
   else { live.classList.remove("alert"); }
   if(s.last_cycle_new>0 && state.cat==="全部" && !state.q){ loadNews(); loadSidebar(); }
+  pollCollector();
 }
 let bannerTimer;
 function banner(m){const b=$("#banner");b.textContent=m;b.classList.add("show");clearTimeout(bannerTimer);bannerTimer=setTimeout(()=>b.classList.remove("show"),6000);}
-async function forceRefresh(){ toast("正在重新採集真實新聞…"); const s=await postj("/api/refresh",{}); if(s.error){toast("採集失敗："+s.error);return;} await loadSidebar(); await loadHotTabs(); await loadNews(); toast("已更新："+s.last_cycle_new+" 則新新聞"); }
+async function forceRefresh(){ toast("正在重新採集真實新聞…"); const s=await postj("/api/refresh",{}); if(s.error){toast("採集失敗："+s.error);return;} await loadSidebar(); await loadHotTabs(); await loadNews(); toast("已更新："+(s.last_cycle_new??0)+" 則新新聞"); }
+
+// ---------- 採集器狀態（🟢正常 / 🟡部分失敗 / 🔴異常）----------
+async function pollCollector(){
+  try{
+    const s=await getj("/api/collector/status");
+    window.__col=s;
+    const el=$("#collector"), meta=$("#colMeta");
+    if(!s.sources_total){ el.className="collector ok"; meta.textContent="採集中…"; return; }
+    if(s.sources_failed===0){ el.className="collector ok"; meta.textContent=`🟢 採集正常 ${s.sources_success}/${s.sources_total}`; }
+    else if(s.sources_success>0){ el.className="collector partial"; meta.textContent=`🟡 部分失敗 ${s.sources_failed}`; }
+    else { el.className="collector bad"; meta.textContent="🔴 採集異常"; }
+  }catch(e){}
+}
+function openCollector(){
+  const s=window.__col||{};
+  const fmt=t=>t?new Date(t*1000).toLocaleString():'-';
+  const rows=(s.per_source||[]).map(r=>`<tr class="${r.status==='ok'?'':'warn'}"><td>${esc(r.source)}</td><td>${r.status==='ok'?'✅':'⚠️'}</td><td>${r.http_status??'-'}</td><td>${r.entries}</td><td>${r.inserted}</td><td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.error||'')}">${esc(r.error||'')}</td></tr>`).join('');
+  $("#mCollectorBody").innerHTML=`
+    <div class="kpis">
+      <div><b>${s.last_inserted??0}</b><span>本次新增</span></div>
+      <div><b>${s.sources_success??0}/${s.sources_total??0}</b><span>成功來源</span></div>
+      <div><b style="color:#ef4444">${s.sources_failed??0}</b><span>失敗來源</span></div>
+      <div><b>${s.total_news??0}</b><span>新聞總數</span></div>
+    </div>
+    <p class="muted">最後採集：${fmt(s.last_run)} ｜ 下次採集：${fmt(s.next_run)} ｜ 間隔：${s.fetch_interval??15} 分鐘</p>
+    ${s.last_error?`<p class="warnbox">⚠️ 最近錯誤：${esc(s.last_error)}</p>`:''}
+    <h4>各來源最新狀態</h4>
+    <table class="tbl"><thead><tr><th>來源</th><th>狀態</th><th>HTTP</th><th>條目</th><th>入庫</th><th>錯誤</th></tr></thead><tbody>${rows||'<tr><td colspan=6>尚無資料，請先點擊「重新整理」</td></tr>'}</tbody></table>`;
+  openModal("mCollector");
+}
 
 // ---------- modal ----------
 function openModal(id){$("#"+id).classList.add("open");}

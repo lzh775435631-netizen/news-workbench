@@ -5,7 +5,7 @@
 動態消息(RSS/API) -> 自動擷取 -> 資料庫(SQLite) -> AI處理 -> 新聞工作台
 全程使用真實公開新聞來源（Google News 主題/搜尋 RSS + 50+ 國際媒體 RSS）。
 """
-import os, json, time, sqlite3, threading, re, math, html, collections, datetime
+import os, json, time, sqlite3, threading, re, math, html, collections, datetime, io
 import concurrent.futures
 from urllib.parse import urlparse, parse_qs, quote, urlencode
 import feedparser, requests
@@ -29,11 +29,29 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 LLM_API_MODE = os.environ.get("LLM_API_MODE", "chat").lower()
 
 WRITE_LOCK = threading.Lock()
+# 採集請求統一帶瀏覽器 UA，避免被部分新聞網站以 403/空響應拒絕（Render 資料中心 IP 尤為常見）
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 last_sync = 0
 last_cycle_new = 0
 last_cycle_breaking = []
 prev_cluster_hot = {}
 prev_avg_hot = 0
+
+# 採集器運行狀態（供 /api/collector/status 使用，絕不包含任何 API Key）
+collector_state = {
+    "running": True,
+    "last_run": 0,
+    "last_success": 0,
+    "last_inserted": 0,
+    "last_failed": 0,
+    "total_news": 0,
+    "next_run": 0,
+    "sources_total": 0,
+    "sources_success": 0,
+    "sources_failed": 0,
+    "last_error": "",
+}
 
 STOP = set("的 了 在 是 和 與 及 也 都 就 而 或 一個 我們 你們 他們 這個 那個 已經 可能 可以 如何 為何 為什麼 什麼 哪些 表示 指出 稱 說 將 對 與 等 中 年 月 日 時 分 個 項 起 後 前 上 下 內 外 大 小 the a an and or of to in for on at by with from as is are be was were this that these those it its he she they we you i not no yes if then than so but".split())
 NOISE = set("nbsp com www http https news google sina net org cn sg gov co uk html url comments reuters ap afp 图片 视频 直播 专题 中国 美国 日本 俄羅斯 俄 乌克兰 烏克蘭 全球 世界 国际 国内 国家 政府 公司 市场 年 月 日 今天 本周 表示 称 报道 以及 和 与 对 在 将 等 一项 一名 中新网 新浪 新浪网 网易 腾讯 搜狐 央视 新华网 人民网 联合 消息 最新 突发 快讯 使用 数据 显示 chinanews sohu sina view views photo photos after before from with that this what when where why who how new news said say has have will amid into over more top best its his her their our your are was were been being not but they them then than out up down off about just like only also can may might must should would get got see show shows via per vs year years day days week time first last as at by of on to us we you he she it every exterior interior read reading watch watching here there which while where about above below between during against both few each other another".split())
@@ -250,6 +268,13 @@ def init_db():
       research_id INTEGER, related_id INTEGER,
       PRIMARY KEY(research_id, related_id)
     );
+    CREATE TABLE IF NOT EXISTS collector_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_at TEXT, source TEXT, status TEXT,
+      http_status INTEGER, resp_len INTEGER DEFAULT 0,
+      entries INTEGER DEFAULT 0, inserted INTEGER DEFAULT 0, error TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_clog_src ON collector_logs(source);
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_facts_rid ON facts(research_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_conflicts_rid ON conflicts(research_id)")
@@ -292,8 +317,29 @@ def source_url(src):
     return src["url"]
 
 def fetch_source(src):
+    """單一來源採集：使用 requests 顯式控制 timeout / UA / 重定向 / 編碼，
+    並以 try/except 隔離——任何單一來源失敗都不會影響其他來源或整個週期。"""
+    meta = {"source": src.get("id", "?"), "name": src.get("name", "?"),
+            "url": source_url(src), "http_status": None, "resp_len": 0,
+            "entries": 0, "inserted": 0, "error": None, "sec": 0.0}
+    t = time.time()
     try:
-        d = feedparser.parse(source_url(src))
+        resp = requests.get(
+            meta["url"], timeout=15,
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
+            allow_redirects=True)
+        meta["http_status"] = resp.status_code
+        meta["resp_len"] = len(resp.content)
+        meta["sec"] = round(time.time() - t, 1)
+        if resp.status_code != 200:
+            meta["error"] = f"HTTP {resp.status_code}"
+            return [], meta
+        # 編碼：feedparser 直接解析位元組流，自動處理 charset
+        d = feedparser.parse(io.BytesIO(resp.content))
         out = []
         for e in d.entries[:45]:
             title = clean_title(getattr(e, "title", ""), getattr(e, "source", None) and getattr(e.source, "title", "") or "")
@@ -308,24 +354,48 @@ def fetch_source(src):
             elif getattr(e, "updated_parsed", None):
                 pub = int(time.mktime(e.updated_parsed))
             if not pub:
-                pub = now_unix()
+                pub = now_unix()  # 時間解析失敗時回退為採集時間，不丟棄整條新聞
             out.append({
                 "title": title, "summary": summary, "link": link,
                 "source": src_name, "source_id": src["id"], "category": src["category"],
                 "lang": src.get("lang", "en"), "published": pub,
                 "weight": float(src.get("weight", 1.0)),
             })
-        return out
+        meta["entries"] = len(out)
+        if not out and getattr(d, "bozo", 0):
+            meta["error"] = "parse: " + str(getattr(d, "bozo_exception", "unknown"))[:140]
+        return out, meta
     except Exception as ex:
-        print(f"[fetch error] {src['id']}: {ex}")
-        return []
+        meta["sec"] = round(time.time() - t, 1)
+        meta["error"] = f"{type(ex).__name__}: {str(ex)[:160]}"
+        return [], meta
 
 def fetch_all(sources):
-    results = []
+    out = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-        for r in ex.map(fetch_source, sources):
-            results.extend(r)
-    return results
+        for src, res in zip(sources, ex.map(fetch_source, sources)):
+            items, meta = res
+            out.append((src, items, meta))
+    return out
+
+def _log_collector(meta, conn):
+    try:
+        conn.execute(
+            "INSERT INTO collector_logs(run_at,source,status,http_status,resp_len,entries,inserted,error) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (iso(now_unix()), meta.get("source"),
+             "ok" if meta.get("error") is None else "fail",
+             meta.get("http_status"), meta.get("resp_len", 0), meta.get("entries", 0),
+             meta.get("inserted", 0), (meta.get("error") or "")[:300]))
+    except Exception:
+        pass
+
+def prune_collector_logs(conn):
+    """只保留最近 2000 條採集日誌，避免無限增長。"""
+    try:
+        conn.execute("DELETE FROM collector_logs WHERE id <= (SELECT MAX(id) - 2000 FROM collector_logs)")
+    except Exception:
+        pass
 
 # ----------------------------------------------------------------------------
 # 處理循環
@@ -374,36 +444,66 @@ def cluster(articles):
 
 def process_cycle():
     global last_sync, last_cycle_new, last_cycle_breaking, prev_cluster_hot, prev_avg_hot
+    global collector_state
     t0 = time.time()
-    with open(FEEDS, encoding="utf-8") as f:
-        cfg = json.load(f)
-    sources = cfg["sources"]
-    raw = fetch_all(sources)
-    inserted = 0
+    try:
+        with open(FEEDS, encoding="utf-8") as f:
+            cfg = json.load(f)
+        sources = cfg["sources"]
+    except Exception as e:
+        print(f"[cycle] feeds read error: {e}")
+        collector_state["last_error"] = f"feeds: {e}"
+        return
+    collected = fetch_all(sources)
     conn = db()
-    for it in raw:
-        norm = norm_title(it["title"])
-        if not norm:
-            continue
-        kw = extract_keywords(it["title"], it["summary"])
-        summ = summarize(it["summary"] or it["title"], kw)
-        is_brk = breaking_of(it["title"], it["summary"], it["published"])
-        try:
-            conn.execute(
-                """INSERT OR IGNORE INTO news
-                   (title,norm_title,summary,content,link,source,source_id,category,lang,
-                    published,published_iso,fetched,keywords,hotness,importance,is_breaking,cluster_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (it["title"], norm, summ, it["summary"], it["link"], it["source"], it["source_id"],
-                 it["category"], it["lang"], it["published"], iso(it["published"]), now_unix(),
-                 json.dumps(kw, ensure_ascii=False), 1, "低", is_brk, 0))
-            inserted += conn.total_changes and 0  # placeholder
-        except Exception:
-            pass
-    # 精確計算新增數
-    cur = conn.execute("SELECT COUNT(*) FROM news WHERE fetched > ?", (int(last_sync),)).fetchone()[0]
-    last_cycle_new = cur
-    conn.commit()
+    metas = []
+    for src, items, meta in collected:
+        metas.append(meta)
+        ins = 0
+        for it in items:
+            norm = norm_title(it["title"])
+            if not norm:
+                continue
+            kw = extract_keywords(it["title"], it["summary"])
+            summ = summarize(it["summary"] or it["title"], kw)
+            is_brk = breaking_of(it["title"], it["summary"], it["published"])
+            try:
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO news
+                       (title,norm_title,summary,content,link,source,source_id,category,lang,
+                        published,published_iso,fetched,keywords,hotness,importance,is_breaking,cluster_id)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (it["title"], norm, summ, it["summary"], it["link"], it["source"], it["source_id"],
+                     it["category"], it["lang"], it["published"], iso(it["published"]), now_unix(),
+                     json.dumps(kw, ensure_ascii=False), 1, "低", is_brk, 0))
+                if cur.rowcount == 1:
+                    ins += 1
+            except Exception as ex:
+                meta["error"] = f"insert: {ex}"
+        meta["inserted"] = ins
+        conn.commit()  # 每個來源提交一次，確保已採集資料即時落庫
+    # 記錄每來源採集日誌（失敗來源不影響整體）
+    for meta in metas:
+        _log_collector(meta, conn)
+    prune_collector_logs(conn)
+    # 以資料庫為準精確計算本輪新增（避免跨來源重複計數偏差）
+    last_cycle_new = conn.execute("SELECT COUNT(*) FROM news WHERE fetched > ?", (int(last_sync),)).fetchone()[0]
+    # 更新採集器運行狀態（供 /api/collector/status 使用）
+    succ = sum(1 for m in metas if m["error"] is None and m["entries"] > 0)
+    fail = sum(1 for m in metas if m["error"] is not None or m["entries"] == 0)
+    errs = [f"{m['source']}: {m['error']}" for m in metas if m["error"]]
+    collector_state["last_run"] = int(t0)
+    collector_state["last_inserted"] = last_cycle_new
+    collector_state["last_failed"] = fail
+    collector_state["sources_total"] = len(metas)
+    collector_state["sources_success"] = succ
+    collector_state["sources_failed"] = fail
+    collector_state["next_run"] = now_unix() + get_fetch_interval() * 60
+    if last_cycle_new > 0 or succ > 0:
+        collector_state["last_success"] = now_unix()
+    collector_state["total_news"] = conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
+    collector_state["running"] = True
+    collector_state["last_error"] = "; ".join(errs[:5])
 
     # 載入近 10 天文章做聚類
     rows = conn.execute(
@@ -817,6 +917,31 @@ def api_status():
             "last_cycle_new": last_cycle_new, "breaking": len(last_cycle_breaking),
             "breaking_list": last_cycle_breaking, "total": (db().execute("SELECT COUNT(*) FROM news").fetchone()[0]),
             "fetch_interval": json.load(open(FEEDS, encoding="utf-8")).get("fetch_interval_minutes", 15)}
+
+def api_collector_status():
+    """採集器運行狀態。僅含統計/狀態資訊，絕不包含任何 API Key。"""
+    st = dict(collector_state)
+    st["fetch_interval"] = get_fetch_interval()
+    st["last_cycle_new"] = last_cycle_new
+    try:
+        st["total_news"] = db().execute("SELECT COUNT(*) FROM news").fetchone()[0]
+    except Exception:
+        st["total_news"] = 0
+    c = db()
+    try:
+        logs = c.execute(
+            "SELECT run_at,source,status,http_status,resp_len,entries,inserted,error "
+            "FROM collector_logs ORDER BY id DESC LIMIT 80").fetchall()
+        st["recent_logs"] = [dict(r) for r in logs]
+        rows = c.execute(
+            "SELECT l.source,l.status,l.http_status,l.resp_len,l.entries,l.inserted,l.error,l.run_at "
+            "FROM collector_logs l WHERE l.id = (SELECT MAX(id) FROM collector_logs WHERE source=l.source) "
+            "ORDER BY l.source").fetchall()
+        st["per_source"] = [dict(r) for r in rows]
+    except Exception:
+        st["recent_logs"] = []; st["per_source"] = []
+    c.close()
+    return st
 
 def api_llm_status():
     """回傳 LLM 啟用狀態。絕不包含真實 API Key。"""
@@ -2037,6 +2162,7 @@ class H(BaseHTTPRequestHandler):
             return
         try:
             if path == "/api/status": return self._send(200, api_status())
+            if path == "/api/collector/status": return self._send(200, api_collector_status())
             if path == "/api/llm/status": return self._send(200, api_llm_status())
             if path == "/api/categories": return self._send(200, api_categories())
             if path == "/api/sources": return self._send(200, api_sources())
@@ -2097,9 +2223,8 @@ class H(BaseHTTPRequestHandler):
                 return self._send(500, {"error": str(e)})
         if path == "/api/refresh":
             try:
-                with WRITE_LOCK:
-                    process_cycle()
-                return self._send(200, api_status())
+                run_cycle()
+                return self._send(200, api_collector_status())
             except Exception as e:
                 return self._send(500, {"error": str(e)})
         if path == "/api/research/create": return self._send(200, api_research_create(body))
@@ -2119,24 +2244,36 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/topics/update": return self._send(200, api_topic_update(body))
         self._send(404, {"error": "not found"})
 
+def get_fetch_interval():
+    """採集間隔（分鐘）。優先環境變數，其次 feeds.json，異常時回退 15 分鐘。"""
+    try:
+        iv = int(os.environ.get("FETCH_INTERVAL_MINUTES", "0")) or \
+             json.load(open(FEEDS, encoding="utf-8")).get("fetch_interval_minutes", 15)
+        if iv <= 0:
+            iv = 15
+    except Exception:
+        iv = 15
+    return iv
+
+def run_cycle():
+    """統一採集入口：加鎖執行，避免與 scheduler / refresh 併發寫入。"""
+    with WRITE_LOCK:
+        process_cycle()
+
 def scheduler():
     while True:
         try:
-            with WRITE_LOCK:
-                process_cycle()
+            run_cycle()
         except Exception as e:
             print(f"[scheduler error] {e}")
-        try:
-            iv = int(os.environ.get("FETCH_INTERVAL_MINUTES", "0")) or \
-                 json.load(open(FEEDS, encoding="utf-8")).get("fetch_interval_minutes", 15)
-        except Exception:
-            iv = 15
+            collector_state["last_error"] = str(e)[:200]
+        iv = get_fetch_interval()
         time.sleep(iv * 60)
 
 def main():
     init_db()
     # 背景立即執行首次採集（不阻塞服務啟動）
-    threading.Thread(target=lambda: (time.sleep(1), process_cycle()), daemon=True).start()
+    threading.Thread(target=lambda: (time.sleep(1), run_cycle()), daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
     print(f"新聞情報工作台已啟動: http://localhost:{PORT}")
