@@ -1,3 +1,5 @@
 feedparser==6.0.11
 requests==2.32.3
 jieba==0.42.1
+# 僅在設定 DATABASE_URL（生產 PostgreSQL）時才會被 import；本地 SQLite 不受影響
+psycopg2-binary>=2.9

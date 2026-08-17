@@ -22,6 +22,173 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE, "news.db"))
 os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
 DB = DB_PATH
 FEEDS = os.path.join(BASE, "feeds.json")
+
+# ---------------------------------------------------------------------------
+# 資料庫抽象層：SQLite / PostgreSQL 雙模式
+#   - 本地 / 未設定 DATABASE_URL → SQLite（現有行為完全不變）
+#   - 設定 DATABASE_URL（生產 PostgreSQL）→ 自動切換，業務 API 零改動
+# 透過 SmartCursor 在遊標層透明轉換 SQLite 風格 SQL，避免改寫任何業務查詢。
+# ---------------------------------------------------------------------------
+USE_PG = bool(os.environ.get("DATABASE_URL"))
+
+# 統一綱要模板：自增主鍵用 {IDPK} 佔位，依後端替換為
+#   SQLite  -> INTEGER PRIMARY KEY AUTOINCREMENT
+#   PostgreSQL -> SERIAL PRIMARY KEY
+# 其餘欄位 / 約束 / 索引兩端完全一致，確保 18 張表結構相容。
+_DDL_TPL = """
+CREATE TABLE IF NOT EXISTS news (
+  id {IDPK},
+  title TEXT, norm_title TEXT UNIQUE, summary TEXT, content TEXT,
+  link TEXT, source TEXT, category TEXT, lang TEXT,
+  published INTEGER, published_iso TEXT, fetched INTEGER,
+  keywords TEXT, hotness INTEGER DEFAULT 0, importance TEXT DEFAULT '低',
+  is_breaking INTEGER DEFAULT 0, cluster_id INTEGER DEFAULT 0,
+  read INTEGER DEFAULT 0, starred INTEGER DEFAULT 0, later INTEGER DEFAULT 0,
+  notes TEXT DEFAULT '', tags TEXT DEFAULT '[]', source_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cat ON news(category);
+CREATE INDEX IF NOT EXISTS idx_pub ON news(published);
+CREATE INDEX IF NOT EXISTS idx_clu ON news(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_src ON news(source);
+CREATE TABLE IF NOT EXISTS clusters (
+  cluster_id INTEGER PRIMARY KEY, repr TEXT, category TEXT, size INTEGER,
+  sources TEXT, hotness INTEGER, is_breaking INTEGER,
+  created INTEGER, updated INTEGER, keywords TEXT
+);
+CREATE TABLE IF NOT EXISTS searches (id {IDPK}, q TEXT, ts INTEGER);
+CREATE TABLE IF NOT EXISTS researches (
+  id {IDPK},
+  news_id INTEGER, cluster_id INTEGER, title TEXT,
+  core_question TEXT, phenomenon TEXT, my_view TEXT,
+  status TEXT DEFAULT '待研究', writing_score INTEGER DEFAULT 0,
+  event TEXT, why_matters TEXT,
+  controversies TEXT, counterintuitive TEXT, extension_questions TEXT,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS arguments (
+  id {IDPK},
+  research_id INTEGER, content TEXT, explanation TEXT,
+  strength TEXT DEFAULT '中', credibility TEXT DEFAULT '中',
+  my_response TEXT, counter_view TEXT,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS evidence (
+  id {IDPK},
+  argument_id INTEGER, type TEXT, title TEXT, content TEXT,
+  source TEXT, source_url TEXT, verified INTEGER DEFAULT 0,
+  created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS topics (
+  id {IDPK},
+  research_id INTEGER, title TEXT, core_question TEXT,
+  initial_view TEXT, status TEXT DEFAULT '待研究', score INTEGER DEFAULT 0,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS research_news (
+  research_id INTEGER, news_id INTEGER,
+  PRIMARY KEY(research_id, news_id)
+);
+CREATE TABLE IF NOT EXISTS topic_arguments (
+  topic_id INTEGER, argument_id INTEGER,
+  PRIMARY KEY(topic_id, argument_id)
+);
+CREATE TABLE IF NOT EXISTS entities (
+  id {IDPK},
+  type TEXT, name TEXT, description TEXT DEFAULT '',
+  created_at TEXT, updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_uniq ON entities(type, name);
+CREATE TABLE IF NOT EXISTS news_entities (
+  news_id INTEGER, entity_id INTEGER,
+  PRIMARY KEY(news_id, entity_id)
+);
+CREATE TABLE IF NOT EXISTS research_entities (
+  research_id INTEGER, entity_id INTEGER,
+  PRIMARY KEY(research_id, entity_id)
+);
+CREATE TABLE IF NOT EXISTS facts (
+  id {IDPK},
+  research_id INTEGER, content TEXT, source TEXT, source_url TEXT,
+  first_seen TEXT, confirm_count INTEGER DEFAULT 1, status TEXT DEFAULT 'single',
+  created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS conflicts (
+  id {IDPK},
+  research_id INTEGER, type TEXT, claim_a TEXT, source_a TEXT,
+  claim_b TEXT, source_b TEXT, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS research_updates (
+  id {IDPK},
+  research_id INTEGER, summary TEXT, new_facts TEXT, new_conflicts TEXT,
+  created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS research_links (
+  research_id INTEGER, related_id INTEGER,
+  PRIMARY KEY(research_id, related_id)
+);
+CREATE TABLE IF NOT EXISTS collector_logs (
+  id {IDPK},
+  run_at TEXT, source TEXT, status TEXT,
+  http_status INTEGER, resp_len INTEGER DEFAULT 0,
+  entries INTEGER DEFAULT 0, inserted INTEGER DEFAULT 0, error TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_clog_src ON collector_logs(source);
+"""
+
+SQLITE_DDL = _DDL_TPL.format(IDPK="INTEGER PRIMARY KEY AUTOINCREMENT")
+PG_DDL = _DDL_TPL.format(IDPK="SERIAL PRIMARY KEY")
+
+if USE_PG:
+    import psycopg2
+    from psycopg2.extras import DictCursor
+
+    class SmartCursor(DictCursor):
+        """PostgreSQL 相容層（繼承 DictCursor，保持 row[0]/row['col']/dict(row) 三種存取）。
+        execute 時透明轉換：
+          - ? 占位符 -> %s
+          - INSERT OR IGNORE -> INSERT ... ON CONFLICT DO NOTHING
+          - 自增表 INSERT -> 補 RETURNING id 並回填 lastrowid
+        """
+        SERIAL_TABLES = {
+            "news", "searches", "researches", "arguments", "evidence",
+            "topics", "entities", "facts", "conflicts",
+            "research_updates", "collector_logs",
+        }
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._lastrowid = None
+
+        @property
+        def lastrowid(self):
+            return self._lastrowid
+
+        def execute(self, sql, args=None):
+            s = sql
+            is_ignore = False
+            if re.search(r"\bINSERT\s+OR\s+IGNORE\b", s, re.I):
+                s = re.sub(r"\bINSERT\s+OR\s+IGNORE\b", "INSERT", s, flags=re.I)
+                is_ignore = True
+            tm = re.search(r"\bINSERT\s+(?:INTO\s+)?(\w+)", s, re.I)
+            tbl = tm.group(1).lower() if tm else None
+            add_returning = bool(tbl) and tbl in self.SERIAL_TABLES and "RETURNING" not in s.upper()
+            s = s.replace("?", "%s")
+            if is_ignore and "ON CONFLICT" not in s.upper():
+                s += " ON CONFLICT DO NOTHING"
+            if add_returning:
+                s += " RETURNING id"
+            super().execute(s, args)
+            if add_returning:
+                try:
+                    row = self.fetchone()
+                    self._lastrowid = row[0] if row is not None else None
+                except Exception:
+                    self._lastrowid = None
+            else:
+                self._lastrowid = None
+    _PG_CURSOR_FACTORY = SmartCursor
+else:
+    _PG_CURSOR_FACTORY = None
 PORT = int(os.environ.get("PORT", "8800"))
 
 # 可選 LLM（OpenAI 相容）— 設定環境變數即啟用，未設定則使用啟發式 AI
@@ -176,111 +343,22 @@ def breaking_of(title, summary, pub):
 # 資料庫
 # ----------------------------------------------------------------------------
 def db():
+    if USE_PG:
+        return psycopg2.connect(os.environ["DATABASE_URL"], cursor_factory=_PG_CURSOR_FACTORY)
     c = sqlite3.connect(DB, timeout=30, check_same_thread=False)
     c.row_factory = sqlite3.Row
     return c
 
 def init_db():
     c = db()
-    c.executescript("""
-    CREATE TABLE IF NOT EXISTS news (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT, norm_title TEXT UNIQUE, summary TEXT, content TEXT,
-      link TEXT, source TEXT, category TEXT, lang TEXT,
-      published INTEGER, published_iso TEXT, fetched INTEGER,
-      keywords TEXT, hotness INTEGER DEFAULT 0, importance TEXT DEFAULT '低',
-      is_breaking INTEGER DEFAULT 0, cluster_id INTEGER DEFAULT 0,
-      read INTEGER DEFAULT 0, starred INTEGER DEFAULT 0, later INTEGER DEFAULT 0,
-      notes TEXT DEFAULT '', tags TEXT DEFAULT '[]', source_id TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_cat ON news(category);
-    CREATE INDEX IF NOT EXISTS idx_pub ON news(published);
-    CREATE INDEX IF NOT EXISTS idx_clu ON news(cluster_id);
-    CREATE INDEX IF NOT EXISTS idx_src ON news(source);
-    CREATE TABLE IF NOT EXISTS clusters (
-      cluster_id INTEGER PRIMARY KEY, repr TEXT, category TEXT, size INTEGER,
-      sources TEXT, hotness INTEGER, is_breaking INTEGER,
-      created INTEGER, updated INTEGER, keywords TEXT
-    );
-    CREATE TABLE IF NOT EXISTS searches (id INTEGER PRIMARY KEY AUTOINCREMENT, q TEXT, ts INTEGER);
-    CREATE TABLE IF NOT EXISTS researches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      news_id INTEGER, cluster_id INTEGER, title TEXT,
-      core_question TEXT, phenomenon TEXT, my_view TEXT,
-      status TEXT DEFAULT '待研究', writing_score INTEGER DEFAULT 0,
-      event TEXT, why_matters TEXT,
-      controversies TEXT, counterintuitive TEXT, extension_questions TEXT,
-      created_at TEXT, updated_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS arguments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      research_id INTEGER, content TEXT, explanation TEXT,
-      strength TEXT DEFAULT '中', credibility TEXT DEFAULT '中',
-      my_response TEXT, counter_view TEXT,
-      created_at TEXT, updated_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS evidence (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      argument_id INTEGER, type TEXT, title TEXT, content TEXT,
-      source TEXT, source_url TEXT, verified INTEGER DEFAULT 0,
-      created_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS topics (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      research_id INTEGER, title TEXT, core_question TEXT,
-      initial_view TEXT, status TEXT DEFAULT '待研究', score INTEGER DEFAULT 0,
-      created_at TEXT, updated_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS research_news (
-      research_id INTEGER, news_id INTEGER,
-      PRIMARY KEY(research_id, news_id)
-    );
-    CREATE TABLE IF NOT EXISTS topic_arguments (
-      topic_id INTEGER, argument_id INTEGER,
-      PRIMARY KEY(topic_id, argument_id)
-    );
-    CREATE TABLE IF NOT EXISTS entities (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT, name TEXT, description TEXT DEFAULT '',
-      created_at TEXT, updated_at TEXT
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_uniq ON entities(type, name);
-    CREATE TABLE IF NOT EXISTS news_entities (
-      news_id INTEGER, entity_id INTEGER,
-      PRIMARY KEY(news_id, entity_id)
-    );
-    CREATE TABLE IF NOT EXISTS research_entities (
-      research_id INTEGER, entity_id INTEGER,
-      PRIMARY KEY(research_id, entity_id)
-    );
-    CREATE TABLE IF NOT EXISTS facts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      research_id INTEGER, content TEXT, source TEXT, source_url TEXT,
-      first_seen TEXT, confirm_count INTEGER DEFAULT 1, status TEXT DEFAULT 'single',
-      created_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS conflicts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      research_id INTEGER, type TEXT, claim_a TEXT, source_a TEXT,
-      claim_b TEXT, source_b TEXT, created_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS research_updates (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      research_id INTEGER, summary TEXT, new_facts TEXT, new_conflicts TEXT,
-      created_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS research_links (
-      research_id INTEGER, related_id INTEGER,
-      PRIMARY KEY(research_id, related_id)
-    );
-    CREATE TABLE IF NOT EXISTS collector_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_at TEXT, source TEXT, status TEXT,
-      http_status INTEGER, resp_len INTEGER DEFAULT 0,
-      entries INTEGER DEFAULT 0, inserted INTEGER DEFAULT 0, error TEXT DEFAULT ''
-    );
-    CREATE INDEX IF NOT EXISTS idx_clog_src ON collector_logs(source);
-    """)
+    if USE_PG:
+        # PostgreSQL 不支援 executescript 多語句，逐條執行等價 DDL
+        for stmt in PG_DDL.split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                c.execute(stmt)
+    else:
+        c.executescript(SQLITE_DDL)
     c.execute("CREATE INDEX IF NOT EXISTS idx_facts_rid ON facts(research_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_conflicts_rid ON conflicts(research_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ru_rid ON research_updates(research_id)")
@@ -288,6 +366,15 @@ def init_db():
     c.commit(); c.close()
 
 def _column_exists(c, table, col):
+    if USE_PG:
+        try:
+            rows = c.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name=%s AND column_name=%s",
+                (table, col),
+            ).fetchall()
+            return len(rows) > 0
+        except Exception:
+            return False
     try:
         cols = [r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()]
         return col in cols
