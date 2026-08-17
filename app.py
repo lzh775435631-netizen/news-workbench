@@ -11,6 +11,7 @@ from urllib.parse import urlparse, parse_qs, quote, urlencode
 import feedparser, requests
 import jieba
 from jieba import analyse
+from jieba import posseg as _posseg
 
 jieba.setLogLevel(20)
 
@@ -492,43 +493,151 @@ def prune_collector_logs(conn):
 # ----------------------------------------------------------------------------
 # 處理循環
 # ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 事件聚类辅助（仅用于聚类比较，不修改数据库原始字段）
+# ---------------------------------------------------------------------------
+def norm_title(t):
+    """轻量标题归一化，用于聚类比较；不改动库内原始 title。"""
+    if not t:
+        return ""
+    s = t
+    # 1) 去除 #话题标签
+    s = re.sub(r"#[\w一-鿿]+", "", s)
+    # 2) 去除媒体/来源后缀：- 中国日报网、— 新华网、丨盘前线索 等
+    s = re.sub(r"[\s\-—丨|·:：　]+(日报网|新闻网|新华网|央视网|人民网|中新网|网|电视台|客户端)[\s\-—丨|·:：　]*$", "", s)
+    s = re.sub(r"[\s\-—丨|·:：　]+盘前线索[\s\-—丨|·:：　]*$", "", s)
+    # 3) 去除尾部分隔符/标点
+    s = re.sub(r"[\s\-—丨|·:：　]+$", "", s)
+    # 4) 主语归一（主语不是事件身份）
+    s = s.replace("我国", "").replace("中国", "").replace("中方", "")
+    # 5) 动词短语归一 -> 成功发射
+    s = (s.replace("发射成功", "成功发射")
+            .replace("成功完成发射", "成功发射")
+            .replace("顺利发射", "成功发射"))
+    # 6) 去除无意义 filler
+    for f in ("了", "已", "正式", "顺利", "目前", "最新", "消息称", "据", "称", "表示"):
+        s = s.replace(f, "")
+    return s.strip()
+
+
+# 非实体/弱词（动词、通用虚词、来源词），不计入事件实体
+_WEAK_ENT = set(
+    "的 了 在 是 和 与 及 也 都 就 而 或 一个 我们 你们 他们 这个 那个 已经 可能 可以 "
+    "如何 为何 为什么 什么 哪些 表示 指出 称 说 将 对 等 中 年 月 日 时 分 个 项 起 后 前 "
+    "上 下 内 外 大 小 成功发射 发射 成功 完成 研制 联合 计划 公布 上涨 下跌 消息 报道 最新"
+    .split()
+)
+
+
+def _is_strong(e):
+    """强实体：含数字且非纯数字（如 "24组"），或长度>=4 的名词/专名。"""
+    if any(ch.isdigit() for ch in e):
+        # 纯数字（如 "24"）不算强实体，需带汉字/字母才有区分度（如 "24组"）
+        return bool(re.search(r"[一-鿿A-Za-z]", e))
+    return len(e) >= 4
+
+
+def _event_entities(title):
+    """从（归一化后）标题抽取事件实体，保留含数字的词，不丢弃阿拉伯数字。"""
+    s = norm_title(title)
+    if not s:
+        return set()
+    ents = set()
+    # 正则强实体（强制保留数字）
+    for m in re.finditer(r"(卫星互联网低轨|低轨\s*\d+\s*组|长征\s*十二\s*号|长征\d+号|\d+\s*组)", s):
+        ents.add(re.sub(r"\s+", "", m.group(0)))
+    try:
+        for w, flag in _posseg.cut(s):
+            w = (w or "").strip().lower()
+            if not w or w in _WEAK_ENT:
+                continue
+            if any(ch in w for ch in "./@"):
+                continue
+            if any(ch.isdigit() for ch in w):
+                ents.add(w)
+            elif len(w) >= 4:
+                ents.add(w)
+            elif len(w) >= 3:
+                ents.add(w)
+            elif len(w) >= 2 and flag.startswith(("n", "nr", "ns", "nt", "nz", "nl", "ng")):
+                ents.add(w)
+    except Exception:
+        pass
+    return ents
+
+
+def _should_merge(a, b, ea, eb):
+    inter = ea & eb
+    if not inter:
+        return False
+    strong_shared = sum(1 for e in inter if _is_strong(e))
+    if strong_shared < 1:
+        return False
+    union = ea | eb
+    jac = (len(inter) / len(union)) if union else 0.0
+    shared = len(inter)
+    base = (jac >= 0.5) or (shared >= 3)
+    ta, tb = a.get("pub", 0), b.get("pub", 0)
+    if not (ta and tb):
+        return base
+    dt = abs(ta - tb)
+    if dt <= 6 * 3600:
+        # 时间窗口放松，但已共享强实体是前提
+        return base or (jac >= 0.4) or (shared >= 2)
+    if dt > 24 * 3600:
+        # 长期提高门槛，防误合并
+        return (strong_shared >= 2) or (jac >= 0.55)
+    return base
+
+
 def cluster(articles):
     n = len(articles)
     parent = list(range(n))
+
     def find(x):
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
         return x
+
     def union(a, b):
         ra, rb = find(a), find(b)
         if ra != rb:
             parent[ra] = rb
-    df = {}
-    ks = []
-    for a in articles:
-        fk = set(k for k in a["kws"] if k not in GENTOPIC)
-        ks.append(fk)
-        for k in fk:
-            df[k] = df.get(k, 0) + 1
-    total = max(1, n)
-    sig_kw = set(k for k, v in df.items() if v <= max(2, int(total * 0.10)))
-    post = collections.defaultdict(list)
-    for i, fk in enumerate(ks):
-        for k in fk:
-            if k in sig_kw:
-                post[k].append(i)
-    for k, lst in post.items():
-        for i in range(len(lst)):
-            for j in range(i + 1, len(lst)):
-                a, b = lst[i], lst[j]
-                sa, sb = ks[a], ks[b]
-                if not sa or not sb:
+
+    ents = []
+    strong_idx = collections.defaultdict(list)
+    link_first = {}
+    for i, a in enumerate(articles):
+        e = _event_entities(a.get("title", "") or "")
+        ents.append(e)
+        for tok in e:
+            if _is_strong(tok):
+                strong_idx[tok].append(i)
+        lk = a.get("link")
+        if lk:
+            if lk not in link_first:
+                link_first[lk] = i
+            elif link_first[lk] != i:
+                union(i, link_first[lk])
+    # 仅对共享强实体的文章对比较（保证 >=1 强实体才可能合并）
+    seen = set()
+    for tok, lst in strong_idx.items():
+        if len(lst) < 2:
+            continue
+        # 防止极热词导致组合爆炸：单 token 帖子过多时裁剪
+        if len(lst) > 600:
+            lst = lst[:600]
+        for x in range(len(lst)):
+            ai = lst[x]
+            for y in range(x + 1, len(lst)):
+                bi = lst[y]
+                key = (ai, bi) if ai < bi else (bi, ai)
+                if key in seen:
                     continue
-                inter = len(sa & sb)
-                uni = len(sa | sb)
-                if (uni > 0 and inter / uni >= 0.5) or inter >= 4:
-                    union(a, b)
+                seen.add(key)
+                if ents[ai] and ents[bi] and _should_merge(articles[ai], articles[bi], ents[ai], ents[bi]):
+                    union(ai, bi)
     groups = collections.defaultdict(list)
     for i in range(n):
         groups[find(i)].append(i)
