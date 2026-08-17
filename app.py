@@ -757,19 +757,18 @@ def llm_status_info():
 # ----------------------------------------------------------------------------
 # API 處理
 # ----------------------------------------------------------------------------
-def api_news(params):
+def query_news(params):
+    """返回經過篩選的 news 行（dict 列表，不含 LIMIT/OFFSET）。供 /api/news 與 /api/events 共用，避免重複篩選邏輯。"""
     cat = params.get("category", ["全部"])[0]
     q = params.get("q", [""])[0].strip()
     source = params.get("source", [""])[0].strip()
     frm = params.get("from", [""])[0].strip()
     to = params.get("to", [""])[0].strip()
     minhot = params.get("minHot", ["0"])[0]
-    sort = params.get("sort", ["hot"])[0]
     starred = params.get("starred", ["0"])[0]
     read = params.get("read", [""])[0]
     later = params.get("later", ["0"])[0]
-    limit = int(params.get("limit", ["40"])[0])
-    offset = int(params.get("offset", ["0"])[0])
+    sort = params.get("sort", ["hot"])[0]
     sql = "SELECT * FROM news WHERE 1=1"
     args = []
     if cat not in ("全部", ""):
@@ -811,9 +810,73 @@ def api_news(params):
     elif read == "0":
         sql += " AND read=0"
     sql += " ORDER BY " + ("hotness DESC" if sort == "hot" else "published DESC")
-    sql += " LIMIT ? OFFSET ?"; args += [limit, offset]
     c = db(); rows = c.execute(sql, args).fetchall(); c.close()
-    return {"items": [dict(r) for r in rows], "count": len(rows)}
+    return [dict(r) for r in rows]
+
+def api_news(params):
+    limit = int(params.get("limit", ["40"])[0])
+    offset = int(params.get("offset", ["0"])[0])
+    rows = query_news(params)
+    page = rows[offset:offset+limit]
+    return {"items": page, "count": len(page)}
+
+def _clu_map():
+    """clusters 表快取：cluster_id -> 行，供事件聚合複用 repr/hotness/category。"""
+    c = db()
+    rs = c.execute("SELECT cluster_id,repr,category,size,sources,hotness,is_breaking,keywords FROM clusters").fetchall()
+    c.close()
+    return {r["cluster_id"]: dict(r) for r in rs}
+
+def api_events(params):
+    """首頁事件流：按 cluster_id 聚合，一個 cluster = 一張事件卡。
+    原始 news 完整保留（不刪除、不修改內容），僅在展示層聚合。"""
+    sort = params.get("sort", ["hot"])[0]
+    limit = int(params.get("limit", ["40"])[0])
+    offset = int(params.get("offset", ["0"])[0])
+    rows = query_news(params)
+    # 按 cluster_id 分組（單例 cluster 的 cluster_id==自身 id，自然成獨立事件）
+    groups = {}
+    for r in rows:
+        groups.setdefault(r["cluster_id"], []).append(r)
+    clu = _clu_map()
+    iorder = {"高": 3, "中": 2, "低": 1, "": 0}
+    events = []
+    for cid, members in groups.items():
+        # 規則 9：同 URL 不重複（展示層去重，不動庫）
+        seen, dm = set(), []
+        for m in members:
+            key = (m.get("link") or "") or ("#" + str(m["id"]))
+            if key in seen:
+                continue
+            seen.add(key); dm.append(m)
+        c = clu.get(cid)
+        if c and c.get("repr"):
+            title = c["repr"]
+        else:
+            title = max(dm, key=lambda m: m["hotness"])["title"]
+        hot = (c.get("hotness") or 0) if (c and c.get("hotness")) else max(m["hotness"] for m in dm)
+        cat = (c.get("category") or "") if (c and c.get("category")) else (dm[0].get("category") or "")
+        imp = max(dm, key=lambda m: iorder.get(m.get("importance") or "低", 1))["importance"]
+        brk = 1 if any(m.get("is_breaking") for m in dm) else 0
+        contro = 1 if any(any(kw in (m.get("title") or "") for kw in CONTROVERSY_KW) for m in dm) else 0
+        sources = sorted({m.get("source") for m in dm if m.get("source")})
+        latest_iso = max((m.get("published_iso") or "") for m in dm)
+        latest_pub = max((m.get("published") or 0) for m in dm)
+        members_out = [{"id": m["id"], "source": m.get("source"), "title": m.get("title"),
+                        "link": m.get("link"), "published_iso": m.get("published_iso"),
+                        "published": m.get("published"), "hotness": m.get("hotness"),
+                        "summary": m.get("summary")} for m in dm]
+        events.append({"cluster_id": cid, "title": title, "hotness": hot, "category": cat,
+                       "importance": imp, "is_breaking": brk, "controversial": contro,
+                       "source_count": len(sources), "sources": sources,
+                       "latest_update": latest_iso, "latest_pub": latest_pub,
+                       "size": len(dm), "members": members_out})
+    if sort == "hot":
+        events.sort(key=lambda e: -e["hotness"])
+    else:
+        events.sort(key=lambda e: -e["latest_pub"])
+    page = events[offset:offset+limit]
+    return {"events": page, "count": len(events)}
 
 def api_categories():
     c = db()
@@ -2259,6 +2322,7 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/categories": return self._send(200, api_categories())
             if path == "/api/sources": return self._send(200, api_sources())
             if path == "/api/news": return self._send(200, api_news(params))
+            if path == "/api/events": return self._send(200, api_events(params))
             if path == "/api/hotspots": return self._send(200, api_hotspots())
             if path == "/api/briefing": return self._send(200, api_briefing())
             if path == "/api/research": return self._send(200, api_research(params))

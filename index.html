@@ -89,6 +89,16 @@ button{font-family:inherit;cursor:pointer}
 .chip.imp{background:#fde8ee;color:var(--red)}
 .chip.brk{background:var(--red);color:#fff;font-weight:700}
 .chip.evt{background:#eef7ee;color:var(--green);cursor:pointer}
+.chip.con{background:#fff3e0;color:#c8651b}
+.evt-card{cursor:pointer}
+.evt-card:hover{box-shadow:0 4px 14px rgba(15,27,51,.12)}
+.ev-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 14px}
+.ev-list{display:flex;flex-direction:column;gap:10px}
+.ev-item{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fafbfd}
+.ev-src{font-size:12px;color:var(--muted);margin-bottom:3px}
+.ev-title{font-size:14px;font-weight:600;color:var(--ink);text-decoration:none;line-height:1.4}
+.ev-title:hover{color:var(--blue2);text-decoration:underline}
+.ev-meta2{display:flex;gap:12px;margin-top:5px;font-size:12px;color:var(--muted)}
 .card h3{margin:2px 0 6px;font-size:16px;line-height:1.4}
 .card h3 a{color:var(--ink)}
 .card .sum{color:#45506a;line-height:1.7;font-size:13.5px;margin:0 0 10px}
@@ -502,6 +512,13 @@ button{font-family:inherit;cursor:pointer}
   <div id="rdBody"></div>
 </div></div>
 
+<!-- 事件來源詳情（首頁事件卡點擊展開）-->
+<div class="modal" id="mEvent"><div class="sheet" style="max-width:760px">
+  <button class="close" onclick="closeModal('mEvent')">✕ 關閉</button>
+  <h2 id="evTitle"></h2>
+  <div id="evBody"></div>
+</div></div>
+
 <!-- 論點庫 -->
 <div class="modal" id="mArgLib"><div class="sheet" style="max-width:960px">
   <button class="close" onclick="closeModal('mArgLib')">✕ 關閉</button>
@@ -631,50 +648,65 @@ async function loadHotTabs(){
 }
 function openHotOne(t){ const tab=window.__hot.find(x=>x.t===t); openHotspots(); setTimeout(()=>tab.fn(),60); }
 
-// ---------- 新聞列表 ----------
+// ---------- 事件流（首頁按 cluster 聚合，一個 cluster 一張卡）----------
+let __evMap = {};  // cluster_id -> event 物件（含 members），供點擊展開來源
 async function loadNews(){
-  let p=`/api/news?category=${encodeURIComponent(state.cat)}&q=${encodeURIComponent(state.q)}&source=${encodeURIComponent(state.source)}&minHot=${state.hot}&sort=${state.sort}`;
+  let p=`/api/events?category=${encodeURIComponent(state.cat)}&q=${encodeURIComponent(state.q)}&source=${encodeURIComponent(state.source)}&minHot=${state.hot}&sort=${state.sort}`;
   if(state.read!=="") p+=`&read=${state.read}`;
   if(state.time){ const d=new Date(); d.setDate(d.getDate()-parseInt(state.time)); p+=`&from=${d.toISOString().slice(0,10)}`; }
   const data=await getj(p);
-  renderList(data.items);
-  $("#listSub").textContent=`共 ${data.count} 筆`;
-  $("#listTitle").textContent = state.q? `搜尋「${state.q}」` : (state.cat==="全部"?"今日熱點新聞":state.cat+" 新聞");
+  renderEvents(data.events);
+  $("#listSub").textContent=`共 ${data.count} 個事件`;
+  $("#listTitle").textContent = state.q? `搜尋「${state.q}」` : (state.cat==="全部"?"今日熱點事件":"「"+state.cat+"」事件");
 }
 function hotClass(h){return h>=68?"hot-hi":h>=42?"hot-mid":"hot-lo";}
-function renderList(items){
-  if(!items.length){$("#list").innerHTML=`<div class="empty"><div class="big">🗞️</div>暫無新聞，請稍候或點擊「重新整理」。</div>`;return;}
+function renderEvents(events){
+  if(!events.length){$("#list").innerHTML=`<div class="empty"><div class="big">🗞️</div>暫無事件，請稍候或點擊「重新整理」。</div>`;return;}
   let h="";
-  for(const n of items){
-    const sz=clusterSize[n.cluster_id]||1;
-    const evt = sz>1?`<span class="chip evt" onclick="openResearch(${n.cluster_id})" title="同一事件多來源聚合">🔗 ${sz} 來源</span>`:"";
-    const brk = n.is_breaking?`<span class="chip brk">⚡ 突發</span>`:"";
-    const imp = n.importance==="高"?`<span class="chip imp">重要</span>`:"";
-    const kws=(JSON.parse(n.keywords||"[]")||[]).slice(0,5).map(k=>`<span class="kw">${esc(k)}</span>`).join("");
-    const starOn=n.starred?"on":""; const laterOn=n.later?"on":""; const readOn=n.read?"on":"";
-    h+=`<div class="card">
-      <div class="acts">
-        <button class="act ${starOn}" title="收藏" onclick="act(${n.id},'star',this)">⭐</button>
-        <button class="act ${laterOn}" title="稍後看" onclick="act(${n.id},'later',this)">📌</button>
-        <button class="act ${readOn}" title="已讀" onclick="act(${n.id},'read',this)">✓</button>
-        <button class="act" title="筆記/標籤" onclick="openNote(${n.id})">📝</button>
-        <button class="act" title="分享" onclick="share('${esc(n.link)}')">🔗</button>
-      </div>
+  for(const ev of events){
+    __evMap[ev.cluster_id]=ev;
+    const brk = ev.is_breaking?`<span class="chip brk">⚡ 突發</span>`:"";
+    const imp = ev.importance==="高"?`<span class="chip imp">重要</span>`:"";
+    const con = ev.controversial?`<span class="chip con">🧨 爭議</span>`:"";
+    const evt = ev.source_count>1?`<span class="chip evt" onclick="event.stopPropagation();openResearch(${ev.cluster_id})" title="同一事件多來源，點此看研究">🔗 ${ev.source_count} 來源</span>`:"";
+    const star = ev.members&&ev.members.length?`<button class="act" title="收藏代表新聞" onclick="event.stopPropagation();act(${ev.members[0].id},'star',this)">⭐</button>`:"";
+    h+=`<div class="card evt-card" onclick="openEvent(${ev.cluster_id})">
       <div class="ctop">
-        <span class="chip cat">${esc(n.category)}</span>${imp}${brk}
-        <span class="chip" style="background:#f0f3f9;color:#46536e">${esc(n.source)}</span>${evt}
+        <span class="chip cat">${esc(ev.category)}</span>${imp}${brk}${con}${evt}
       </div>
-      <h3><a href="${esc(n.link)}" target="_blank" onclick="markRead(${n.id})">${esc(n.title)}</a></h3>
-      <p class="sum">${esc(n.summary||"")}</p>
+      <h3>${esc(ev.title)}</h3>
       <div class="cmeta">
-        <span>🕒 ${fmtTime(n.published_iso)}</span>
-        <span class="hot ${hotClass(n.hotness)}">🔥 熱度 ${n.hotness}</span>
-        <span>重要度：${n.importance}</span>
+        <span>🕒 ${fmtTime(ev.latest_update)}</span>
+        <span class="hot ${hotClass(ev.hotness)}">🔥 熱度 ${ev.hotness}</span>
+        <span>${ev.source_count} 個來源</span>
       </div>
-      <div class="kws">${kws}</div>
+      <div class="kws"><button class="act" title="研究" onclick="event.stopPropagation();openResearch(${ev.cluster_id})">🔬 研究</button>${star}</div>
     </div>`;
   }
   $("#list").innerHTML=h;
+}
+function openEvent(cid){
+  const ev=__evMap[cid]; if(!ev) return;
+  $("#evTitle").textContent=ev.title;
+  let h=`<div class="ev-meta">
+    <span class="chip cat">${esc(ev.category)}</span>
+    ${ev.is_breaking?'<span class="chip brk">⚡ 突發</span>':''}
+    ${ev.importance==="高"?'<span class="chip imp">重要</span>':''}
+    ${ev.controversial?'<span class="chip con">🧨 爭議</span>':''}
+    <span class="chip">🔥 熱度 ${ev.hotness}</span>
+    <span class="chip evt">🔗 ${ev.source_count} 來源</span>
+    <span>🕒 ${fmtTime(ev.latest_update)}</span>
+  </div><div class="ev-list">`;
+  for(const m of ev.members){
+    h+=`<div class="ev-item">
+      <div class="ev-src">${esc(m.source||"")}</div>
+      <a class="ev-title" href="${esc(m.link||"#")}" target="_blank" onclick="markRead(${m.id})">${esc(m.title)}</a>
+      <div class="ev-meta2"><span>🕒 ${fmtTime(m.published_iso)}</span><span class="hot ${hotClass(m.hotness)}">🔥 ${m.hotness}</span></div>
+    </div>`;
+  }
+  h+=`</div>`;
+  $("#evBody").innerHTML=h;
+  openModal("mEvent");
 }
 async function act(id,type,el){
   let on=true;
@@ -1446,26 +1478,26 @@ async function mLoadNews(){
   const el=$("#mvLatest"); if(!el) return;
   el.innerHTML=`<div class="empty">載入中…</div>`;
   try{
-    const news=await getj(`/api/news?category=${encodeURIComponent(mMobileCat)}&sort=${mMobileSort}&limit=30`);
-    el.innerHTML = news.items.length ? news.items.map(mCard).join("") : `<div class="tip">暫無「${esc(mMobileCat)}」新聞</div>`;
+    const news=await getj(`/api/events?category=${encodeURIComponent(mMobileCat)}&sort=${mMobileSort}&limit=30`);
+    el.innerHTML = news.events.length ? news.events.map(mCard).join("") : `<div class="tip">暫無「${esc(mMobileCat)}」事件</div>`;
   }catch(e){ el.innerHTML=`<div class="tip">載入失敗</div>`; }
 }
-function mCard(n){
-  const sz=clusterSize[n.cluster_id]||1;
-  const starOn=n.starred?"primary":"";
-  const brk = n.is_breaking?`<span class="chip brk">⚡</span>`:"";
-  const imp = n.importance==="高"?`<span class="chip imp">重要</span>`:"";
-  const evt = sz>1?`<span class="chip evt" onclick="event.stopPropagation();openResearch(${n.cluster_id})">🔗 ${sz} 來源</span>`:"";
-  return `<div class="mcard">
-    <h3><a href="${esc(n.link)}" target="_blank" onclick="markRead(${n.id})">${esc(n.title)}</a></h3>
+function mCard(ev){
+  __evMap[ev.cluster_id]=ev;
+  const brk = ev.is_breaking?`<span class="chip brk">⚡</span>`:"";
+  const imp = ev.importance==="高"?`<span class="chip imp">重要</span>`:"";
+  const con = ev.controversial?`<span class="chip con">🧨</span>`:"";
+  const evt = ev.source_count>1?`<span class="chip evt" onclick="event.stopPropagation();openResearch(${ev.cluster_id})">🔗 ${ev.source_count}</span>`:"";
+  return `<div class="mcard" onclick="openEvent(${ev.cluster_id})">
+    <h3>${esc(ev.title)}</h3>
     <div class="mmeta">
-      <span>${esc(n.source)}</span><span>·</span><span>${fmtTime(n.published_iso)}</span>
-      <span class="hot ${hotClass(n.hotness)}">🔥 ${n.hotness}</span>
-      <span class="chip cat">${esc(n.category)}</span>${imp}${brk}${evt}
+      <span>${esc(ev.category)}</span>
+      <span class="hot ${hotClass(ev.hotness)}">🔥 ${ev.hotness}</span>
+      <span>🕒 ${fmtTime(ev.latest_update)}</span>
+      ${imp}${brk}${con}${evt}
     </div>
     <div class="mbot">
-      <button class="mbtn primary" onclick="openResearch(${n.cluster_id})">🔬 研究</button>
-      <button class="mbtn ${starOn}" onclick="mStar(${n.id},this)">⭐ 收藏</button>
+      <button class="mbtn primary" onclick="event.stopPropagation();openResearch(${ev.cluster_id})">🔬 研究</button>
     </div>
   </div>`;
 }
