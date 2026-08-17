@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>新聞情報工作台 · 最終版</title>
+<meta name="theme-color" content="#0f1b33">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="新聞工作台">
 <style>
 :root{
   --bg:#f4f6fb; --panel:#ffffff; --ink:#1f2733; --muted:#6b7686; --line:#e6eaf1;
@@ -221,6 +225,98 @@ button{font-family:inherit;cursor:pointer}
 .link-hit{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#f8fafd;border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin:4px 0;font-size:12.5px}
 .link-hit button{flex:none}
 
+/* ===== 手機端（<=768px）===== */
+/* 桌面端預設隱藏手機殼層 */
+.m-top,.botnav,.mapp{display:none}
+
+@media(max-width:768px){
+  /* 隱藏桌面佈局，切換為手機工作台 */
+  .header{display:none}
+  .layout{display:none}
+  .banner{top:0;border-radius:0}
+  body{font-size:15px}
+  .toast{bottom:74px}
+
+  /* 頂部欄：Logo + 搜尋 + 狀態 */
+  .m-top{display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:30;
+    background:#0f1b33;color:#fff;padding:10px 12px;box-shadow:var(--shadow)}
+  .m-top .mlogo{font-weight:700;font-size:15px;white-space:nowrap;flex:none}
+  .m-top .mlogo span{color:#5b9bff}
+  .m-top .msearch{flex:1;display:flex;gap:6px;min-width:0}
+  .m-top .msearch input{flex:1;min-width:0;padding:9px 12px;border-radius:9px;border:1px solid #2a3a5c;
+    background:#16233f;color:#fff;font-size:14px;outline:none}
+  .m-top .msearch input::placeholder{color:#8aa0c4}
+  .m-top .mstatus{display:flex;align-items:center;gap:6px;flex:none;font-size:11px;color:#9fb3d6;white-space:nowrap}
+  .m-top .mstatus .cdot{width:9px;height:9px;border-radius:50%}
+  .m-top .mstatus.ok .cdot{background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.18)}
+  .m-top .mstatus.partial .cdot{background:#f59e0b;box-shadow:0 0 0 4px rgba(245,158,11,.18)}
+  .m-top .mstatus.bad .cdot{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.18)}
+
+  /* 底部固定導航 */
+  .botnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:35;
+    background:#0f1b33;border-top:1px solid #1d2c4d;padding:4px 0 calc(4px + env(safe-area-inset-bottom));
+    box-shadow:0 -2px 12px rgba(0,0,0,.18)}
+  .botnav .bn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+    color:#8aa0c4;font-size:11px;padding:6px 2px;cursor:pointer;border:none;background:none}
+  .botnav .bn .ico{font-size:20px;line-height:1}
+  .botnav .bn.on{color:#fff}
+  .botnav .bn.on .ico{filter:drop-shadow(0 0 6px rgba(91,155,255,.7))}
+
+  /* 手機內容區 */
+  .mapp{display:block;padding:12px 12px 72px}
+  .mview{display:none}
+  .mview.on{display:block}
+  .msec-title{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:1px;
+    margin:18px 4px 10px;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+  .msec-title:first-child{margin-top:4px}
+  .msec-title .line{flex:1;height:1px;background:var(--line)}
+
+  /* 手機新聞卡片 */
+  .mcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 14px;
+    margin-bottom:11px;box-shadow:var(--shadow)}
+  .mcard h3{margin:0 0 8px;font-size:16px;line-height:1.45}
+  .mcard .mmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-bottom:8px}
+  .mcard .mmeta .hot{font-weight:700}
+  .mcard .mbot{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .mbtn{border:1px solid var(--line);background:#f3f6fc;color:#46536e;border-radius:9px;
+    padding:6px 12px;font-size:12.5px;font-weight:600}
+  .mbtn:active{background:#e7eefc}
+  .mbtn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+
+  /* 手機熱點卡片 */
+  .mhot{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;
+    margin-bottom:10px;box-shadow:var(--shadow);cursor:pointer}
+  .mhot .mh-top{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .mhot .mh-emo{font-size:16px}
+  .mhot h4{margin:0;font-size:15px;line-height:1.4}
+  .mhot .mh-meta{color:var(--muted);font-size:12px;margin-top:4px}
+  .mhot .mh-hot{font-weight:700;color:var(--red)}
+
+  /* 手機熱點標籤列 */
+  .mhottabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px}
+  .mhottabs .hottab{flex:none}
+
+  /* 我的：選單 */
+  .mmenu{display:grid;gap:10px}
+  .mrow{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:13px 14px;box-shadow:var(--shadow);cursor:pointer}
+  .mrow .ml{font-size:14px;font-weight:600}
+  .mrow .mr{color:var(--muted);font-size:18px}
+  .mrow.sub{background:#f8fafd}
+
+  /* 手機全屏模態 */
+  .modal{padding:0;align-items:stretch;z-index:60}
+  .sheet{max-width:none;width:100%;min-height:100vh;height:100vh;overflow-y:auto;border-radius:0;
+    padding:16px 16px calc(16px + env(safe-area-inset-bottom));animation:none}
+  .sheet .close{position:sticky;top:0;float:none;display:inline-block;margin-bottom:10px;z-index:2}
+  .research .sec h4{position:sticky;top:0}
+  .ctop{flex-wrap:wrap;gap:6px}
+}
+
+/* 手機專用滾動條收斂 */
+@media(max-width:768px){
+  .mhottabs::-webkit-scrollbar{height:0}
+}
 </style>
 </head>
 <body>
@@ -424,6 +520,31 @@ button{font-family:inherit;cursor:pointer}
   <div id="entBody"></div>
 </div></div>
 
+<!-- ===== 手機端工作台（<=768px 才顯示）===== -->
+<div class="m-top">
+  <div class="mlogo">新聞<span>工作台</span></div>
+  <div class="msearch">
+    <input id="mq" placeholder="🔍 搜索新聞 / 事件" onkeydown="if(event.key==='Enter')mSearch()">
+    <button class="btn" onclick="mSearch()">搜</button>
+  </div>
+  <div class="mstatus ok" id="mCol" onclick="openCollector()"><span class="cdot"></span><span id="mColT">採集中</span></div>
+</div>
+
+<div class="mapp">
+  <!-- 新聞 / 首頁資訊流 -->
+  <section class="mview on" id="mvNews"></section>
+  <!-- 研究 -->
+  <section class="mview" id="mvResearch"><div id="mvResearchBody"></div></section>
+  <!-- 我的 -->
+  <section class="mview" id="mvMe"><div id="mvMeBody"></div></section>
+</div>
+
+<div class="botnav">
+  <button class="bn on" data-tab="news" onclick="mSwitch('news')"><span class="ico">📰</span>新聞</button>
+  <button class="bn" data-tab="research" onclick="mSwitch('research')"><span class="ico">🔬</span>研究</button>
+  <button class="bn" data-tab="me" onclick="mSwitch('me')"><span class="ico">👤</span>我的</button>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -431,6 +552,7 @@ const API = "";
 let state = { cat:"全部", q:"", source:"", time:"", hot:0, read:"", sort:"hot", starred:0, later:0 };
 let clusterSize = {}; // cluster_id -> size
 let lastNewsTs = 0;
+let HOT_TARGET = "#hotBody"; // 熱點渲染目標（手機端切換為 #mvHotBody）
 
 function $(s){return document.querySelector(s)}
 function fmtTime(iso){ if(!iso) return ""; const d=new Date(iso.replace(" ","T")+":00"); const diff=(Date.now()-d)/1000;
@@ -563,36 +685,36 @@ async function openBriefing(){
 function briefItem(i,x,extra=""){const tag=i?`<b style="color:var(--red)">${i}.</b> `:"";return `<div class="brief-item">${tag}<span class="t"><a href="${esc(x.link||"#")}" target="_blank">${esc(x.title)}</a></span><div class="m">${esc(x.source)} · ${extra||fmtTime(x.published_iso)}</div></div>`;}
 
 // ---------- 熱點系統 ----------
-function openHotspots(){ openModal("mHot"); renderHotNav(); }
-function renderHotNav(){
+function openHotspots(){ HOT_TARGET="#hotBody"; openModal("mHot"); renderHotNav("#hotNav"); }
+function renderHotNav(navSel="#hotNav"){
   const tabs=window.__hot;
   let h="";for(const t of tabs){h+=`<div class="hottab" style="cursor:pointer" onclick="runHot('${esc(t.t)}')"><span class="em">${t.em}</span>${t.t}</div>`;}
-  $("#hotNav").innerHTML=h;
-  tabs[0].fn();
+  $(navSel).innerHTML=h;
+  if(tabs[0]) tabs[0].fn();
 }
 function runHot(t){const tab=window.__hot.find(x=>x.t===t);if(tab)tab.fn();}
 function showHotList(title,items){
-  if(!items.length){$("#hotBody").innerHTML=`<div class="empty">暫無${title}</div>`;return;}
+  if(!items.length){$(HOT_TARGET).innerHTML=`<div class="empty">暫無${title}</div>`;return;}
   let h=`<h3 style="margin:14px 0 10px">${title}（${items.length}）</h3>`;
   for(const n of items){
     h+=`<div class="card" style="margin-bottom:10px"><div class="ctop"><span class="chip cat">${esc(n.category)}</span>${n.is_breaking?'<span class="chip brk">⚡</span>':''}<span class="chip" style="background:#f0f3f9;color:#46536e">${esc(n.source)}</span></div><h3 style="font-size:15px"><a href="${esc(n.link)}" target="_blank">${esc(n.title)}</a></h3><div class="cmeta"><span>🕒 ${fmtTime(n.published_iso)}</span><span class="hot ${hotClass(n.hotness)}">🔥 ${n.hotness}</span></div></div>`;
   }
-  $("#hotBody").innerHTML=h;
+  $(HOT_TARGET).innerHTML=h;
 }
 function showHotClusters(title,items){
-  if(!items.length){$("#hotBody").innerHTML=`<div class="empty">暫無${title}</div>`;return;}
+  if(!items.length){$(HOT_TARGET).innerHTML=`<div class="empty">暫無${title}</div>`;return;}
   let h=`<h3 style="margin:14px 0 10px">${title}（${items.length} 事件）</h3>`;
   for(const c of items){
     const srcs=JSON.parse(c.sources||"[]");
     h+=`<div class="card" style="cursor:pointer" onclick="openResearch(${c.cluster_id})"><div class="ctop"><span class="chip cat">${esc(c.category)}</span><span class="chip ${c.trend==='rising'?'imp':''}">${c.trend==='rising'?'🚀 升溫':c.trend==='falling'?'📉 降溫':'🆕 新'} ${c.hotness}</span><span class="chip evt">🔗 ${c.size} 來源</span></div><h3 style="font-size:15px">${esc(c.repr)}</h3><div class="cmeta"><span>${srcs.slice(0,4).join("、")}</span></div></div>`;
   }
-  $("#hotBody").innerHTML=h;
+  $(HOT_TARGET).innerHTML=h;
 }
 function showKeywords(kws){
   let h=`<h3 style="margin:14px 0 10px">🔑 熱點關鍵字（依熱度加權）</h3><div class="kwcloud">`;
   const max=kws.length?kws[0].weight:1;
   for(const k of kws){const sz=12+Math.round(14*(k.weight/max));h+=`<span style="font-size:${sz}px;background:#eaf1ff;color:var(--blue2);border-radius:20px;padding:3px 12px">${esc(k.word)} <b>${k.weight}</b></span>`;}
-  h+=`</div>`;$("#hotBody").innerHTML=h;
+  h+=`</div>`;$(HOT_TARGET).innerHTML=h;
 }
 function showGraph(g){
   let h=`<h3 style="margin:14px 0 10px">🕸️ 新聞事件關聯（共享關鍵字）</h3>`;
@@ -602,7 +724,7 @@ function showGraph(g){
     if(!a||!b)continue;
     h+=`<div class="card" style="margin-bottom:8px"><div class="ctop"><span class="chip cat">${esc(a.category)}</span><span class="chip evt">🔗</span><span class="chip cat">${esc(b.category)}</span></div><div style="font-size:13px"><b>${esc(a.repr)}</b> <span style="color:var(--muted)">⇄</span> <b>${esc(b.repr)}</b></div><div class="kws">${e.shared.map(s=>`<span class="kw">${esc(s)}</span>`).join("")}</div></div>`;
   }
-  $("#hotBody").innerHTML=h;
+  $(HOT_TARGET).innerHTML=h;
 }
 
 // ---------- AI 研究 ----------
@@ -711,10 +833,18 @@ async function pollCollector(){
     const s=await getj("/api/collector/status");
     window.__col=s;
     const el=$("#collector"), meta=$("#colMeta");
-    if(!s.sources_total){ el.className="collector ok"; meta.textContent="採集中…"; return; }
-    if(s.sources_failed===0){ el.className="collector ok"; meta.textContent=`🟢 採集正常 ${s.sources_success}/${s.sources_total}`; }
+    if(!s.sources_total){ el.className="collector ok"; meta.textContent="採集中…"; }
+    else if(s.sources_failed===0){ el.className="collector ok"; meta.textContent=`🟢 採集正常 ${s.sources_success}/${s.sources_total}`; }
     else if(s.sources_success>0){ el.className="collector partial"; meta.textContent=`🟡 部分失敗 ${s.sources_failed}`; }
     else { el.className="collector bad"; meta.textContent="🔴 採集異常"; }
+    // 手機端狀態
+    const ml=$("#mCol"), mt=$("#mColT");
+    if(ml){
+      if(!s.sources_total){ ml.className="mstatus ok"; mt.textContent="採集中"; }
+      else if(s.sources_failed===0){ ml.className="mstatus ok"; mt.textContent=`🟢 ${s.sources_success}/${s.sources_total}`; }
+      else if(s.sources_success>0){ ml.className="mstatus partial"; mt.textContent=`🟡 ${s.sources_failed}失敗`; }
+      else { ml.className="mstatus bad"; mt.textContent="🔴 異常"; }
+    }
   }catch(e){}
 }
 function openCollector(){
@@ -748,7 +878,7 @@ function strengthPill(s){const m={"強":"strong","中":"mid","弱":"weak"};retur
 function credPill(c){const m={"高":"cred-hi","中":"cred-mid","低":"cred-lo","待驗證":"cred-w"};return `<span class="pill ${m[c]||'cred-mid'}">${c}</span>`;}
 
 async function openResearchBoard(){ const b=await getj("/api/research/board"); renderBoard(b); openModal("mResearchBoard"); }
-function renderBoard(b){
+function renderBoard(b, target="#rbBody"){
   let h=`<div class="kpi" style="margin:10px 0">
     <div class="k"><b>${b.counts.research}</b><span>研究</span></div>
     <div class="k"><b>${b.counts.argument}</b><span>論點</span></div>
@@ -792,7 +922,7 @@ function renderBoard(b){
       </div>`;
     }
   }
-  $("#rbBody").innerHTML=h;
+  $(target).innerHTML=h;
 }
 function rbSection(title, items){
   if(!items||!items.length) return "";
@@ -1170,6 +1300,98 @@ function renderSearch(results,q){
   $("#searchBody").innerHTML=h;
 }
 
+// ---------- 手機端工作台 ----------
+function isMobile(){ return window.matchMedia && window.matchMedia("(max-width:768px)").matches; }
+let mTab = "news";
+function mSwitch(tab){
+  mTab = tab;
+  document.querySelectorAll(".botnav .bn").forEach(b=>b.classList.toggle("on", b.dataset.tab===tab));
+  document.querySelectorAll(".mview").forEach(v=>v.classList.remove("on"));
+  const v = document.getElementById("mv" + tab.charAt(0).toUpperCase() + tab.slice(1));
+  if(v) v.classList.add("on");
+  if(tab==="news") mRenderHome();
+  else if(tab==="research") mRenderResearch();
+  else if(tab==="me") mRenderMe();
+  window.scrollTo(0,0);
+}
+async function mRenderHome(){
+  const mv=$("#mvNews");
+  mv.innerHTML=`<div class="msec-title">今日熱點<span class="line"></span></div><div id="mvHotList"><div class="empty">載入中…</div></div>`
+    + `<div class="msec-title">最新新聞<span class="line"></span></div><div id="mvLatest"><div class="empty">載入中…</div></div>`;
+  try{ const hot=await getj("/api/news?sort=hot&limit=8");
+    $("#mvHotList").innerHTML = hot.items.length ? hot.items.map(mHotCard).join("") : `<div class="tip">暫無熱點</div>`;
+  }catch(e){}
+  try{ const news=await getj("/api/news?sort=new&limit=20");
+    $("#mvLatest").innerHTML = news.items.length ? news.items.map(mCard).join("") : `<div class="tip">暫無新聞</div>`;
+  }catch(e){}
+}
+function mHotCard(n){
+  const sz=clusterSize[n.cluster_id]||1;
+  const evt = sz>1?` · 🔗${sz}源`:"";
+  return `<div class="mhot" onclick="openResearch(${n.cluster_id})">
+    <div class="mh-top"><span class="mh-emo">🔥</span><h4>${esc(n.title)}</h4></div>
+    <div class="mh-meta">${esc(n.source)} · ${fmtTime(n.published_iso)} · <span class="mh-hot">熱度 ${n.hotness}</span>${evt}</div>
+  </div>`;
+}
+function mCard(n){
+  const sz=clusterSize[n.cluster_id]||1;
+  const starOn=n.starred?"primary":"";
+  const brk = n.is_breaking?`<span class="chip brk">⚡</span>`:"";
+  const imp = n.importance==="高"?`<span class="chip imp">重要</span>`:"";
+  const evt = sz>1?`<span class="chip evt" onclick="event.stopPropagation();openResearch(${n.cluster_id})">🔗 ${sz} 來源</span>`:"";
+  return `<div class="mcard">
+    <h3><a href="${esc(n.link)}" target="_blank" onclick="markRead(${n.id})">${esc(n.title)}</a></h3>
+    <div class="mmeta">
+      <span>${esc(n.source)}</span><span>·</span><span>${fmtTime(n.published_iso)}</span>
+      <span class="hot ${hotClass(n.hotness)}">🔥 ${n.hotness}</span>
+      <span class="chip cat">${esc(n.category)}</span>${imp}${brk}${evt}
+    </div>
+    <div class="mbot">
+      <button class="mbtn primary" onclick="openResearch(${n.cluster_id})">🔬 研究</button>
+      <button class="mbtn ${starOn}" onclick="mStar(${n.id},this)">⭐ 收藏</button>
+    </div>
+  </div>`;
+}
+async function mStar(id,el){
+  const on=!el.classList.contains("primary");
+  await postj("/api/news/action",{id,action:"star",on});
+  el.classList.toggle("primary",on);
+  toast(on?"已收藏":"已取消收藏");
+}
+async function mRenderResearch(){
+  const b=await getj("/api/research/board");
+  renderBoard(b, "#mvResearchBody");
+}
+function mRenderMe(){
+  let h=`<div class="msec-title">我的整理<span class="line"></span></div><div class="mmenu">`;
+  const rows=[["⭐ 我的收藏","收藏"],["📌 稍後閱讀","稍后看"],["✓ 已讀","已读"],["◌ 未讀","未读"]];
+  for(const [l,c] of rows) h+=`<div class="mrow" onclick="mFilterNews('${c}')"><span class="ml">${l}</span><span class="mr">›</span></div>`;
+  h+=`</div><div class="msec-title">工具<span class="line"></span></div><div class="mmenu">`;
+  const tools=[["⟳ 重新整理新聞","forceRefresh()"],["📰 每日簡報","openBriefing()"],["📊 數據統計","openStats()"],
+    ["🔬 研究工作台","openResearchBoard()"],["💡 論點庫","openArgLib()"],["📚 選題庫","openTopicLib()"],
+    ["＋ 新增來源","openAddFeed()"],["⚙ AI 引擎設定","openSettings()"]];
+  for(const [l,fn] of tools) h+=`<div class="mrow" onclick="${fn}"><span class="ml">${l}</span><span class="mr">›</span></div>`;
+  h+=`</div>`;
+  $("#mvMeBody").innerHTML=h;
+}
+async function mFilterNews(cat){
+  mSwitch("news");
+  const mv=$("#mvNews");
+  mv.innerHTML=`<div class="msec-title">${cat}<span class="line"></span></div><div id="mvLatest"><div class="empty">載入中…</div></div>`;
+  try{
+    const news=await getj("/api/news?category="+encodeURIComponent(cat)+"&sort=new&limit=40");
+    $("#mvLatest").innerHTML = news.items.length ? news.items.map(mCard).join("") : `<div class="tip">暫無「${cat}」新聞</div>`;
+  }catch(e){}
+}
+function mSearch(){
+  const q=$("#mq").value.trim(); if(!q){toast("請輸入關鍵字");return;}
+  runSearchMobile(q);
+}
+async function runSearchMobile(q){
+  const d=await getj("/api/search?q="+encodeURIComponent(q));
+  renderSearch(d.results, q); openModal("mSearch");
+}
+
 // ---------- init ----------
 async function init(){
   await loadSidebar();
@@ -1177,8 +1399,12 @@ async function init(){
   await loadNews();
   poll();
   setInterval(poll, 30000);
+  if(isMobile()) mInit();
 }
+function mInit(){ if(isMobile()) mRenderHome(); }
 init();
+
+// PWA（manifest / service worker / 圖標）已準備好，但需後端靜態服務支援，暫未啟用（保持「不改後端」）。
 </script>
 </body>
 </html>
