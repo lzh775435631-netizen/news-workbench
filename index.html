@@ -355,6 +355,40 @@ button{font-family:inherit;cursor:pointer}
 @media(max-width:768px){
   .mhottabs::-webkit-scrollbar{height:0}
 }
+
+/* ===== 手機端重設佈局（嚴格限定 max-width:768px）===== */
+@media(max-width:768px){
+  /* 頂部：搜索預設隱藏，點 🔍 展開 */
+  .m-top .mlogo{flex:1}
+  .m-top .msearch-btn{margin-left:auto;background:rgba(255,255,255,.08);border:1px solid #2a3a5c;color:#cfe0ff;border-radius:9px;padding:6px 10px;font-size:15px;line-height:1}
+  .msearchbar{display:none;gap:8px;padding:8px 12px;background:#0f1b33}
+  .msearchbar.on{display:flex}
+  .msearchbar input{flex:1;min-width:0;padding:9px 12px;border-radius:9px;border:1px solid #2a3a5c;background:#16233f;color:#fff;font-size:14px;outline:none}
+  .msearchbar input::placeholder{color:#8aa0c4}
+
+  /* 熱點中心：2×4 點擊網格 */
+  .mhotgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 2px}
+  .mhotcell{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 13px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .12s}
+  .mhotcell:active{background:#eef3fb}
+  .mhotcell .hc-top{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--ink)}
+  .mhotcell .hc-emo{font-size:17px;flex:none}
+  .mhotcell .hc-n{margin-left:auto;font-size:21px;font-weight:800;color:var(--blue2);line-height:1}
+
+  /* 分類橫向捲動（沿用 .mcatscroll / .mcat） */
+  .mcatscroll{margin:2px 0 4px}
+
+  /* 事件卡：緊湊型 */
+  .mcard{margin-bottom:10px}
+  .mctop{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
+  .mctop .chip{margin:0}
+  .mctop .mhot{margin-left:auto;font-weight:700;font-size:13px}
+  .mctitle{font-size:15.5px;line-height:1.4;font-weight:600;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .mcmeta{display:flex;flex-wrap:wrap;gap:5px;align-items:center;color:var(--muted);font-size:12px;margin-top:7px}
+  .mcacts{display:flex;gap:8px;margin-top:10px}
+  .mcacts .mbtn{flex:1;justify-content:center;display:flex;align-items:center}
+  .mbtn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .ev-overview{background:#f8fafd;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.7;color:#37425c}
+}
 </style>
 </head>
 <body>
@@ -567,12 +601,13 @@ button{font-family:inherit;cursor:pointer}
 
 <!-- ===== 手機端工作台（<=768px 才顯示）===== -->
 <div class="m-top">
-  <div class="mlogo">新聞<span>工作台</span></div>
-  <div class="msearch">
-    <input id="mq" placeholder="🔍 搜索新聞 / 事件" onkeydown="if(event.key==='Enter')mSearch()">
-    <button class="btn" onclick="mSearch()">搜</button>
-  </div>
-  <div class="mstatus ok" id="mCol" onclick="openCollector()"><span class="cdot"></span><span id="mColT">採集中</span></div>
+  <div class="mlogo">論點研究工作台</div>
+  <button class="msearch-btn" onclick="mToggleSearch()" title="搜索">🔍</button>
+  <div class="mstatus ok" id="mCol" onclick="openCollector()" title="採集狀態"><span class="cdot"></span></div>
+</div>
+<div class="msearchbar" id="mSearchBar">
+  <input id="mq" placeholder="搜索新聞 / 事件…" onkeydown="if(event.key==='Enter')mSearch()">
+  <button class="btn" onclick="mSearch()">搜</button>
 </div>
 
 <div class="mapp">
@@ -1375,27 +1410,16 @@ function mSwitch(tab){
   else if(tab==="me") mRenderMe();
   window.scrollTo(0,0);
 }
-let mMobileCat="全部", mMobileSort="hot", mHotDimKey="today_hot";
+let mMobileCat="全部", mMobileSort="hot";
 let mCatsData={categories:[],counts:{}}, mStatsTotal=0;
-const MHOT_DIMS=[
-  {key:"today_hot",em:"🔥",t:"今日熱點"},
-  {key:"rising",em:"🚀",t:"正在升溫"},
-  {key:"falling",em:"📉",t:"熱度下降"},
-  {key:"breaking",em:"⚡",t:"突發新聞"},
-  {key:"controversial",em:"🧨",t:"高爭議"},
-  {key:"ranking",em:"📊",t:"熱點排行"},
-  {key:"keywords",em:"🔑",t:"熱點關鍵字"},
-  {key:"graph",em:"🕸️",t:"事件關聯"},
-];
 async function mRenderHome(){
   const mv=$("#mvNews");
-  mv.innerHTML=`<div class="mstats" id="mvStats"><div class="tip">載入中…</div></div>`
-    + `<div class="msec-title">熱點<span class="line"></span></div>`
-    + `<div class="mhotsub" id="mvHotSub"></div>`
-    + `<div class="mscroll" id="mvHotScroll"><div class="tip">載入中…</div></div>`
-    + `<div class="msec-title">分類<span class="line"></span></div>`
+  mv.innerHTML=
+    `<div class="msec-title">🔥 熱點中心<span class="line"></span></div>`
+    + `<div class="mhotgrid" id="mvHotGrid"><div class="tip">載入中…</div></div>`
+    + `<div class="msec-title">新聞分類<span class="line"></span></div>`
     + `<div class="mcatscroll" id="mvCats"><div class="tip">載入中…</div></div>`
-    + `<div class="mnewsbar"><div class="msec-title" style="margin:0">新聞</div>`
+    + `<div class="mnewsbar"><div class="msec-title" style="margin:0">最新事件</div>`
     +   `<div class="seg"><button class="${mMobileSort==='hot'?'on':''}" onclick="mSetSort('hot')">🔥 熱度</button>`
     +   `<button class="${mMobileSort==='new'?'on':''}" onclick="mSetSort('new')">🕒 最新</button></div></div>`
     + `<div id="mvLatest"><div class="empty">載入中…</div></div>`;
@@ -1403,69 +1427,26 @@ async function mRenderHome(){
     if(!window.__hotData){ const h=await getj("/api/hotspots"); window.__hotData=h; }
     const [stats,cats]=await Promise.all([getj("/api/stats"),getj("/api/categories")]);
     mStatsTotal=stats.total||0; mCatsData=cats;
-    $("#mvStats").innerHTML=mStatStrip(stats,cats);
-    renderHotSub();
-    mHotDim(mHotDimKey);
+    renderMHotGrid();
     renderMobileCats();
-  }catch(e){ $("#mvHotScroll").innerHTML=`<div class="tip">熱點載入失敗</div>`; }
+  }catch(e){ $("#mvHotGrid").innerHTML=`<div class="tip">熱點載入失敗</div>`; }
   mLoadNews();
 }
-function mStatStrip(s,cats){
-  const total=s.total||0, ncat=(cats.categories||[]).length;
-  const hd=window.__hotData||{};
-  const rising=(hd.rising||[]).length, brk=(hd.breaking||[]).length;
-  return `<div class="mstat"><b>${total}</b><span>全部新聞</span></div>`
-    + `<div class="mstat"><b>${ncat}</b><span>全部分類</span></div>`
-    + `<div class="mstat"><b>${rising}</b><span>正在升溫</span></div>`
-    + `<div class="mstat"><b>${brk}</b><span>突發</span></div>`;
-}
-function renderHotSub(){
-  const hd=window.__hotData||{};
-  let html="";
-  for(const d of MHOT_DIMS){
-    let n=0;
-    if(d.key==="graph") n=(hd.graph&&hd.graph.edges)?hd.graph.edges.length:0;
-    else if(Array.isArray(hd[d.key])) n=hd[d.key].length;
-    html+=`<div class="ms ${mHotDimKey===d.key?'on':''}" onclick="mHotDim('${d.key}')">${d.em} ${d.t}${n?` <b>${n}</b>`:""}</div>`;
+function renderMHotGrid(){
+  const tabs=window.__hot||[];
+  if(!tabs.length){ $("#mvHotGrid").innerHTML=`<div class="tip">暫無熱點</div>`; return; }
+  const order=["今日熱點","正在升溫","熱度下降","突發新聞","高爭議","熱點排行","熱點關鍵字","事件關聯"];
+  const sorted=[...tabs].sort((a,b)=>order.indexOf(a.t)-order.indexOf(b.t));
+  let h="";
+  for(const t of sorted){
+    h+=`<div class="mhotcell" onclick="openHotOne('${esc(t.t)}')">
+      <div class="hc-top"><span class="hc-emo">${t.em}</span><span>${t.t}</span><span class="hc-n">${t.n}</span></div>
+    </div>`;
   }
-  $("#mvHotSub").innerHTML=html;
+  $("#mvHotGrid").innerHTML=h;
 }
-function mHotDim(key){
-  mHotDimKey=key; renderHotSub();
-  const hd=window.__hotData||{}; const sc=$("#mvHotScroll");
-  if(key==="keywords"){
-    const kws=hd.keywords||[];
-    sc.innerHTML = kws.length? kws.map(k=>`<span class="mkw">${esc(k.word)} <b>${k.weight}</b></span>`).join("") : `<div class="tip">暫無關鍵字</div>`;
-    return;
-  }
-  if(key==="graph"){
-    const edges=(hd.graph&&hd.graph.edges)||[], nodes=hd.graph&&hd.graph.nodes||[];
-    if(!edges.length){sc.innerHTML=`<div class="tip">暫無事件關聯</div>`;return;}
-    sc.innerHTML=edges.map(e=>{
-      const a=nodes.find(n=>n.id===e.source),b=nodes.find(n=>n.id===e.target);
-      if(!a||!b)return"";
-      return `<div class="mhcard graph" onclick="openResearch(${a.id})"><div class="mc-h">${esc(a.repr)} <span style="color:var(--muted)">⇄</span> ${esc(b.repr)}</div><div class="mc-m">${e.shared.slice(0,4).map(s=>`<span class="kw">${esc(s)}</span>`).join("")}</div></div>`;
-    }).join("");
-    return;
-  }
-  const items=hd[key]||[];
-  if(!items.length){sc.innerHTML=`<div class="tip">暫無</div>`;return;}
-  const isCluster=(key==="rising"||key==="falling");
-  sc.innerHTML=items.map(it=> isCluster? mClusterCardH(it): mHotCardH(it)).join("");
-}
-function mHotCardH(n){
-  const cid=n.cluster_id;
-  const go=cid? `openResearch(${cid})` : `window.open('${esc(n.link||"#")}','_blank')`;
-  return `<div class="mhcard" onclick="${go}"><div class="mc-h">${esc(n.title)}</div>`
-    + `<div class="mc-m"><span>${esc(n.source||"")}</span><span class="mc-hot">🔥 ${n.hotness}</span>${n.is_breaking?'<span class="mc-evt">⚡</span>':''}</div></div>`;
-}
-function mClusterCardH(c){
-  const tr=c.trend==='rising'?'🚀':c.trend==='falling'?'📉':'🆕';
-  const srcs=(JSON.parse(c.sources||"[]")).slice(0,3).join("、");
-  return `<div class="mhcard" onclick="openResearch(${c.cluster_id})"><div class="mc-h">${esc(c.repr)}</div>`
-    + `<div class="mc-m"><span>${tr} ${c.hotness}</span><span class="mc-evt">🔗 ${c.size} 來源</span></div>`
-    + (srcs?`<div class="mc-m"><span>${esc(srcs)}</span></div>`:"") + `</div>`;
-}
+// （舊版熱點橫向卡片已棄用：改由「熱點中心」2×4 網格 + 既有 /api/hotspots 彈窗複用）
+
 function renderMobileCats(){
   const cats=mCatsData;
   let html=`<div class="mcat ${mMobileCat==='全部'?'on':''}" onclick="mPickCat('全部')">全部 <b>${mStatsTotal}</b></div>`;
@@ -1484,29 +1465,54 @@ async function mLoadNews(){
 }
 function mCard(ev){
   __evMap[ev.cluster_id]=ev;
-  const brk = ev.is_breaking?`<span class="chip brk">⚡</span>`:"";
-  const imp = ev.importance==="高"?`<span class="chip imp">重要</span>`:"";
-  const con = ev.controversial?`<span class="chip con">🧨</span>`:"";
-  const evt = ev.source_count>1?`<span class="chip evt" onclick="event.stopPropagation();openResearch(${ev.cluster_id})">🔗 ${ev.source_count}</span>`:"";
-  return `<div class="mcard" onclick="openEvent(${ev.cluster_id})">
-    <h3>${esc(ev.title)}</h3>
-    <div class="mmeta">
-      <span>${esc(ev.category)}</span>
-      <span class="hot ${hotClass(ev.hotness)}">🔥 ${ev.hotness}</span>
-      <span>🕒 ${fmtTime(ev.latest_update)}</span>
-      ${imp}${brk}${con}${evt}
-    </div>
-    <div class="mbot">
+  const brk = ev.is_breaking?`<span class="chip brk">⚡ 突發</span>`:"";
+  const con = ev.controversial?`<span class="chip con">🧨 爭議</span>`:"";
+  const cat = ev.category?`<span class="chip cat">${esc(ev.category)}</span>`:"";
+  const firstId = (ev.members&&ev.members.length)?ev.members[0].id:0;
+  const srcTxt = ev.source_count>1 ? `${esc((ev.sources&&ev.sources[0])||"")}等 ${ev.source_count} 個來源` : (ev.sources&&ev.sources[0]?esc(ev.sources[0]):"");
+  return `<div class="mcard" onclick="mOpenEvent(${ev.cluster_id})">
+    <div class="mctop">${brk}${cat}<span class="mhot ${hotClass(ev.hotness)}">🔥 ${ev.hotness}</span></div>
+    <div class="mctitle">${esc(ev.title)}</div>
+    <div class="mcmeta"><span>${srcTxt}</span><span>·</span><span>${fmtTime(ev.latest_update)}</span><span>· 最新更新</span></div>
+    <div class="mcacts">
       <button class="mbtn primary" onclick="event.stopPropagation();openResearch(${ev.cluster_id})">🔬 研究</button>
+      <button class="mbtn" onclick="event.stopPropagation();mStar(${firstId},this)">⭐ 收藏</button>
     </div>
   </div>`;
 }
 async function mStar(id,el){
-  const on=!el.classList.contains("primary");
+  const on=!el.classList.contains("on");
   await postj("/api/news/action",{id,action:"star",on});
-  el.classList.toggle("primary",on);
+  el.classList.toggle("on",on);
   toast(on?"已收藏":"已取消收藏");
 }
+function mOpenEvent(cid){
+  const ev=__evMap[cid]; if(!ev) return;
+  $("#evTitle").textContent=ev.title;
+  const ov=(ev.members||[]).map(m=>m.summary).filter(Boolean)[0] || "（暫無事件概述）";
+  let h=`<div class="ev-meta">
+    <span class="chip">🔥 ${ev.hotness}</span>
+    <span class="chip cat">${esc(ev.category)}</span>
+    <span class="chip evt">🔗 ${ev.source_count} 個來源</span>
+    ${ev.is_breaking?'<span class="chip brk">⚡ 突發</span>':''}
+    ${ev.controversial?'<span class="chip con">🧨 爭議</span>':''}
+  </div>
+  <div class="msec-title" style="margin:16px 0 6px">事件概述</div>
+  <div class="ev-overview">${esc(ov)}</div>
+  <div class="msec-title" style="margin:16px 0 6px">來源</div>
+  <div class="ev-list">`;
+  for(const m of ev.members){
+    h+=`<div class="ev-item">
+      <div class="ev-src">${esc(m.source||"")}</div>
+      <a class="ev-title" href="${esc(m.link||"#")}" target="_blank" onclick="markRead(${m.id})">${esc(m.title)}</a>
+      <div class="ev-meta2"><span>🕒 ${fmtTime(m.published_iso)}</span><span class="hot ${hotClass(m.hotness)}">🔥 ${m.hotness}</span></div>
+    </div>`;
+  }
+  h+=`</div><div style="margin-top:14px"><button class="btn primary" style="width:100%" onclick="openResearch(${ev.cluster_id})">🔬 開始研究</button></div>`;
+  $("#evBody").innerHTML=h;
+  openModal("mEvent");
+}
+function mToggleSearch(){ const b=$("#mSearchBar"); const on=!b.classList.contains("on"); b.classList.toggle("on",on); if(on) $("#mq").focus(); }
 async function mRenderResearch(){
   const b=await getj("/api/research/board");
   renderBoard(b, "#mvResearchBody");
