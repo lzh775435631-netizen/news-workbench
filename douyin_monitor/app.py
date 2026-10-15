@@ -9,6 +9,8 @@ from urllib.parse import urlparse, parse_qs
 
 DB = os.getenv("DOUYIN_DB_PATH", "/tmp/douyin_hotspots.sqlite3")
 TOKEN = os.getenv("INGEST_TOKEN", "")
+COLLECT_STATUS={"state":"starting","last_run":None,"last_result":None,"last_error":None}
+COLLECT_LOCK=threading.Lock()
 KEYWORDS = ["漫剧","短剧","网剧","观看教程","在哪看","后续","AI漫剧","动态漫","微短剧","怎么看","求剧名","全集","大结局","新剧上线","首播","第一集","更新了"]
 
 def connect():
@@ -97,10 +99,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p=urlparse(self.path)
         if p.path=="/":
-            page="""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>短剧热点监测</title><style>body{font-family:system-ui;background:#101827;color:#eaf0ff;max-width:900px;margin:40px auto;padding:18px}button{background:#4476ef;color:white;border:0;padding:12px;border-radius:8px}article{background:#1c2a40;margin:12px 0;padding:16px;border-radius:12px}a{color:#91b7ff}small{color:#bac5d9}</style><h1>短剧 / 漫剧热点监测</h1><p>公开搜索引擎索引发现 · 非抖音官方实时数据。缺少播放量、点赞等数据时不虚构。</p><button onclick="load()">刷新数据</button><p id="status">正在读取...</p><main id="list"></main><script>async function load(){let s=document.getElementById("status"),m=document.getElementById("list");try{let d=await(await fetch("/api/hotspots?hours=72")).json();s.textContent="最近72小时 · "+d.items.length+" 组候选线索（非真实抖音热度榜）";m.replaceChildren();for(let x of d.items){let a=document.createElement("article"),h=document.createElement("h3"),link=document.createElement("a"),info=document.createElement("small");link.href=x.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=x.title;h.append(link);info.textContent="索引/来源时间："+new Date(x.published*1000).toLocaleString()+" · 线索："+x.evidence_count+" · "+(x.drama_name||"剧名待核实")+" · 来源："+x.source;a.append(h,info);m.append(a)}}catch(e){s.textContent="数据加载失败："+e}}</script><script>load()</script>"""
+            page="""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>短剧热点监测</title><style>body{font-family:system-ui;background:#101827;color:#eaf0ff;max-width:900px;margin:40px auto;padding:18px}button{background:#4476ef;color:white;border:0;padding:12px;border-radius:8px}article{background:#1c2a40;margin:12px 0;padding:16px;border-radius:12px}a{color:#91b7ff}small{color:#bac5d9}</style><h1>短剧 / 漫剧热点监测</h1><p>公开搜索引擎索引发现 · 非抖音官方实时数据。缺少播放量、点赞等数据时不虚构。</p><button onclick="load()">刷新数据</button><p id="status">正在读取...</p><p id="diagnostic" style="color:#ffca79"></p><main id="list"></main><script>async function load(){let s=document.getElementById("status"),m=document.getElementById("list");try{let d=await(await fetch("/api/hotspots?hours=72")).json();s.textContent="最近72小时 · "+d.items.length+" 组候选线索（非真实抖音热度榜）";m.replaceChildren();let diag=document.getElementById("diagnostic");try{let z=await(await fetch("/api/status")).json();let t=z.collector;diag.textContent="采集状态："+t.state+" · 上次采集："+(t.last_run?new Date(t.last_run*1000).toLocaleString():"尚未完成")+" · 最近索引记录："+z.recent_index_records+" · 本次发现："+(t.last_result?.found??"未知")+" · 错误："+(t.last_error||t.last_result?.errors?.length||0)+" · 仅搜索索引，非抖音实时数据"+(z.database_ephemeral?" · 免费实例重启可能清空数据":"")}catch(e){diag.textContent="无法读取采集诊断："+e}for(let x of d.items){let a=document.createElement("article"),h=document.createElement("h3"),link=document.createElement("a"),info=document.createElement("small");link.href=x.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=x.title;h.append(link);info.textContent="索引/来源时间："+new Date(x.published*1000).toLocaleString()+" · 线索："+x.evidence_count+" · "+(x.drama_name||"剧名待核实")+" · 来源："+x.source;a.append(h,info);m.append(a)}}catch(e){s.textContent="数据加载失败："+e}}</script><script>load()</script>"""
             body=page.encode();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body);return
         if p.path=="/api/collect":
             return self.reply(403,{"error":"Manual collection endpoint disabled; background collection runs hourly while instance is awake"})
+        if p.path=="/api/status":
+            with connect() as db:
+                total=db.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+                recent=db.execute("SELECT COUNT(*) FROM videos WHERE published>=?",(int(time.time())-72*3600,)).fetchone()[0]
+            return self.reply(200,{"collector":dict(COLLECT_STATUS),"stored_records":total,"recent_index_records":recent,"source":"public_search_index","direct_douyin":False,"database_ephemeral":DB.startswith("/tmp/")})
         if p.path=="/health":
             return self.reply(200,{"service":"douyin-hotspot-monitor","status":"ok","data_source":"public search index; no direct Douyin access"})
         if p.path=="/api/hotspots":
@@ -124,10 +131,15 @@ if __name__=="__main__":
     port=int(os.getenv("PORT","8000"))
     def worker():
         while True:
+            COLLECT_STATUS["state"]="running"
             try:
                 from .collector import collect
-                print("collection:",collect(),flush=True)
-            except Exception as e: print("collection error:",str(e),flush=True)
+                result=collect()
+                COLLECT_STATUS.update(state="finished",last_run=int(time.time()),last_result=result,last_error=None)
+                print("collection:",result,flush=True)
+            except Exception as e:
+                COLLECT_STATUS.update(state="error",last_run=int(time.time()),last_error=str(e)[:240])
+                print("collection error:",str(e),flush=True)
             time.sleep(3600)
     threading.Thread(target=worker,daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0",port),Handler).serve_forever()
