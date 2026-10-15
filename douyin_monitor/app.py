@@ -52,20 +52,38 @@ def ingest(items):
             except (KeyError,TypeError,ValueError): continue
     return count
 
+def drama_name(title):
+    """Extract a conservative drama label; leave uncertain titles ungrouped."""
+    match=re.search(r"[《〈]([^》〉]{2,45})[》〉]",title)
+    if match:return match.group(1).strip()
+    return None
+
 def report(hours=72):
     now=int(time.time()); cutoff=now-hours*3600
     with connect() as c:
         rows=c.execute("SELECT * FROM videos WHERE published>=? ORDER BY published DESC",(cutoff,)).fetchall()
-        output=[]
+        grouped={}
         for r in rows:
             title=r["title"]
-            if not any(k.lower() in title.lower() for k in KEYWORDS): continue
-            first=c.execute("SELECT * FROM snapshots WHERE video_id=? ORDER BY sampled ASC LIMIT 1",(r["id"],)).fetchone()
-            growth=max(0,r["likes"]-(first["likes"] if first else r["likes"]))
-            age=max(1,(now-r["published"])/3600)
-            score=round((r["likes"]+r["comments"]*3+r["shares"]*5)**0.5/(age+2)**0.4+growth**0.5,2)
-            output.append(dict(r)|{"like_growth":growth,"score":score,"sample_count":c.execute("SELECT COUNT(*) FROM snapshots WHERE video_id=?",(r["id"],)).fetchone()[0]})
-    return sorted(output,key=lambda x:x["score"],reverse=True)
+            if not any(k.lower() in title.lower() for k in KEYWORDS):continue
+            name=drama_name(title)
+            # Uncertain titles are deliberately not merged into an invented drama.
+            key=("drama",name.casefold()) if name else ("item",r["id"])
+            record=dict(r)
+            record["drama_name"]=name
+            record["time_basis"]="search_index_published" if "Google News RSS" in r["source"] else "source_supplied"
+            record["engagement_verified"]="Google News RSS" not in r["source"]
+            record["evidence_count"]=1
+            record["evidence_urls"]=[r["url"]]
+            record["confidence"]="candidate_unverified" if "Google News RSS" in r["source"] else "source_supplied"
+            old=grouped.get(key)
+            if old:
+                old["evidence_count"]+=1
+                if len(old["evidence_urls"])<10:old["evidence_urls"].append(r["url"])
+                if r["published"]>old["published"]:
+                    old.update({k:record[k] for k in ("title","url","published","author","source")})
+            else:grouped[key]=record
+    return sorted(grouped.values(),key=lambda x:(x["evidence_count"],x["published"]),reverse=True)
 
 class Handler(BaseHTTPRequestHandler):
     def reply(self,status,data):
@@ -79,13 +97,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p=urlparse(self.path)
         if p.path=="/":
-            page="""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>短剧热点监测</title><style>body{font-family:system-ui;background:#101827;color:#eaf0ff;max-width:900px;margin:40px auto;padding:18px}button{background:#4476ef;color:white;border:0;padding:12px;border-radius:8px}article{background:#1c2a40;margin:12px 0;padding:16px;border-radius:12px}a{color:#91b7ff}small{color:#bac5d9}</style><h1>短剧 / 漫剧热点监测</h1><p>公开搜索引擎索引发现 · 非抖音官方实时数据。缺少播放量、点赞等数据时不虚构。</p><button onclick="load()">刷新数据</button><p id="status">正在读取...</p><main id="list"></main><script>async function load(){let s=document.getElementById("status"),m=document.getElementById("list");try{let d=await(await fetch("/api/hotspots?hours=72")).json();s.textContent="最近72小时 · "+d.items.length+" 条候选线索";m.replaceChildren();for(let x of d.items){let a=document.createElement("article"),h=document.createElement("h3"),link=document.createElement("a"),info=document.createElement("small");link.href=x.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=x.title;h.append(link);info.textContent="发布时间："+new Date(x.published*1000).toLocaleString()+" · 来源："+x.source;a.append(h,info);m.append(a)}}catch(e){s.textContent="数据加载失败："+e}}</script><script>load()</script>"""
+            page="""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>短剧热点监测</title><style>body{font-family:system-ui;background:#101827;color:#eaf0ff;max-width:900px;margin:40px auto;padding:18px}button{background:#4476ef;color:white;border:0;padding:12px;border-radius:8px}article{background:#1c2a40;margin:12px 0;padding:16px;border-radius:12px}a{color:#91b7ff}small{color:#bac5d9}</style><h1>短剧 / 漫剧热点监测</h1><p>公开搜索引擎索引发现 · 非抖音官方实时数据。缺少播放量、点赞等数据时不虚构。</p><button onclick="load()">刷新数据</button><p id="status">正在读取...</p><main id="list"></main><script>async function load(){let s=document.getElementById("status"),m=document.getElementById("list");try{let d=await(await fetch("/api/hotspots?hours=72")).json();s.textContent="最近72小时 · "+d.items.length+" 组候选线索（非真实抖音热度榜）";m.replaceChildren();for(let x of d.items){let a=document.createElement("article"),h=document.createElement("h3"),link=document.createElement("a"),info=document.createElement("small");link.href=x.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=x.title;h.append(link);info.textContent="索引/来源时间："+new Date(x.published*1000).toLocaleString()+" · 线索："+x.evidence_count+" · "+(x.drama_name||"剧名待核实")+" · 来源："+x.source;a.append(h,info);m.append(a)}}catch(e){s.textContent="数据加载失败："+e}}</script><script>load()</script>"""
             body=page.encode();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body);return
         if p.path=="/api/collect":
-            from .collector import collect
-            return self.reply(200,collect())
+            return self.reply(403,{"error":"Manual collection endpoint disabled; background collection runs hourly while instance is awake"})
         if p.path=="/health":
-            return self.reply(200,{"service":"douyin-hotspot-monitor","status":"ok","data_source":"external ingest required"})
+            return self.reply(200,{"service":"douyin-hotspot-monitor","status":"ok","data_source":"public search index; no direct Douyin access"})
         if p.path=="/api/hotspots":
             try: hours=min(168,max(1,int(parse_qs(p.query).get("hours",["72"])[0])))
             except ValueError: hours=72
