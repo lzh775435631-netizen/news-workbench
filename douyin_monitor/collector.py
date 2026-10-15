@@ -32,7 +32,14 @@ FRESHNESS=[
 BASE_QUERIES=[
 "漫剧 观看教程","短剧 观看教程","AI短剧 第一集","AI漫剧 第一集",
 "动态漫 新剧上线","自制AI短剧 首播","个人创作者 AI短剧",
-"微短剧 求剧名","网剧 后续","短剧 在哪看","漫剧 全集","短剧 求后续"]
+"微短剧 求剧名","网剧 后续","短剧 在哪看","漫剧 全集","短剧 求后续",
+"漫剧 第一集","短剧 第一集","AI短剧 首播","原创漫剧 首播",
+"个人自制AI短剧 更新","AI漫剧 后续","动态漫 第一话","漫剧 求剧名",
+"短剧 求全集","漫剧 求后续","新剧上线 第一集","漫剧 追更",
+"观看教程 新剧","新剧 全集","短剧 结局","漫剧 更新了",
+"AI短剧 自制","短剧 最新一集"]
+PRIORITY_QUERIES=BASE_QUERIES[:12]
+
 SITES=["site:douyin.com/video","site:douyin.com","site:iesdouyin.com"]
 # Rotate combinations across runs to keep hourly requests bounded.
 MAX_QUERIES=max(5,min(60,int(os.getenv("DOUYIN_SEARCH_QUERIES_PER_RUN","24"))))
@@ -42,10 +49,13 @@ def all_queries():
     return list(dict.fromkeys(queries))
 def selected_queries(now=None):
     allq=all_queries()
-    # Stable rotating schedule: each hour processes a different portion.
+    priority=[f"{SITES[0]} {q}" for q in PRIORITY_QUERIES]
+    capacity=max(0,MAX_QUERIES-len(priority))
+    priority_set=set(priority)
+    tail=[q for q in allq if q not in priority_set]
     slot=int((now or time.time())//3600)
-    offset=(slot*MAX_QUERIES)%len(allq)
-    return [allq[(offset+i)%len(allq)] for i in range(min(MAX_QUERIES,len(allq)))]
+    offset=(slot*max(1,capacity))%len(tail)
+    return priority+[tail[(offset+i)%len(tail)] for i in range(capacity)]
 
 def collect():
     items=[];errors=[];seen=set();now=int(time.time())
