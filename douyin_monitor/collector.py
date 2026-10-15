@@ -4,7 +4,7 @@ Not a direct Douyin API. A broad vocabulary does not imply complete coverage.
 import calendar, hashlib, html, itertools, os, re, time
 from urllib.parse import quote
 import requests, feedparser
-from .app import ingest
+from .app import ingest, drama_name
 
 # Full vocabulary: categories, discovery intents, freshness, community language.
 CATEGORIES=[
@@ -80,7 +80,34 @@ def collect():
                               "source":"Google News RSS indexed discovery; not direct Douyin",
                               "likes":0,"comments":0,"shares":0})
         except Exception as ex:errors.append({"query":q,"error":str(ex)[:120]})
-    return {"found":len(items),"ingested":ingest(items),"errors":errors[:8],
+    initial_count=len(items)
+    # Follow up on named works, using the exact title plus launch/update/full-episode intents.
+    # Bound verification queries to avoid flooding public RSS endpoints.
+    names=list(dict.fromkeys(filter(None,(drama_name(x["title"]) for x in items))))[:6]
+    verified_queries=0
+    for name in names:
+        for suffix in ("第一集","更新","全集"):
+            try:
+                q=f"site:douyin.com {name} {suffix}"
+                rss="https://news.google.com/rss/search?q="+quote(q)+"&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+                res=requests.get(rss,timeout=10,headers={"User-Agent":"DouyinDramaResearch/1.0"})
+                res.raise_for_status()
+                verified_queries+=1
+                for e in feedparser.parse(res.content).entries:
+                    title=html.unescape(re.sub("<[^>]+>","",e.get("title",""))).strip()
+                    link=e.get("link","")
+                    stamp=e.get("published_parsed") or e.get("updated_parsed")
+                    if not title or not link or link in seen or not stamp or name not in title:continue
+                    published=calendar.timegm(stamp)
+                    if not now-72*3600<=published<=now+3600:continue
+                    seen.add(link)
+                    items.append({"id":hashlib.sha256(link.encode()).hexdigest()[:24],
+                                  "title":title,"url":link,"published":published,
+                                  "source":"Google News RSS indexed discovery; not direct Douyin",
+                                  "likes":0,"comments":0,"shares":0})
+            except Exception as ex:errors.append({"verification":name,"error":str(ex)[:120]})
+    return {"found":len(items),"initial_found":initial_count,"followup_queries":verified_queries,
+            "named_drama_candidates":len(names),"ingested":ingest(items),"errors":errors[:8],
             "query_count":len(queries),"vocabulary":{"categories":len(CATEGORIES),
             "discovery":len(DISCOVERY),"freshness":len(FRESHNESS)},
             "total_query_combinations":len(all_queries()),
