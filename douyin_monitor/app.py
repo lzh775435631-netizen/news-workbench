@@ -60,6 +60,20 @@ def drama_name(title):
     if match:return match.group(1).strip()
     return None
 
+def raw_records(hours=72):
+    cutoff=int(time.time())-hours*3600
+    with connect() as db:
+        rows=db.execute("SELECT id,title,url,published,source,first_seen FROM videos WHERE published>=? ORDER BY published DESC LIMIT 200",(cutoff,)).fetchall()
+    result=[]
+    for row in rows:
+        x=dict(row)
+        x["matched_keywords"]=[k for k in KEYWORDS if k.lower() in x["title"].lower()]
+        x["drama_name"]=drama_name(x["title"])
+        x["eligible"]=bool(x["matched_keywords"])
+        x["excluded_reason"]=None if x["eligible"] else "标题未命中展示关键词"
+        result.append(x)
+    return result
+
 def report(hours=72):
     now=int(time.time()); cutoff=now-hours*3600
     with connect() as c:
@@ -99,10 +113,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p=urlparse(self.path)
         if p.path=="/":
-            page="""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>短剧热点监测</title><style>body{font-family:system-ui;background:#101827;color:#eaf0ff;max-width:900px;margin:40px auto;padding:18px}button{background:#4476ef;color:white;border:0;padding:12px;border-radius:8px}article{background:#1c2a40;margin:12px 0;padding:16px;border-radius:12px}a{color:#91b7ff}small{color:#bac5d9}</style><h1>短剧 / 漫剧热点监测</h1><p>公开搜索引擎索引发现 · 非抖音官方实时数据。缺少播放量、点赞等数据时不虚构。</p><button onclick="load()">刷新数据</button><p id="status">正在读取...</p><p id="diagnostic" style="color:#ffca79"></p><main id="list"></main><script>async function load(){let s=document.getElementById("status"),m=document.getElementById("list");try{let d=await(await fetch("/api/hotspots?hours=72")).json();s.textContent="最近72小时 · "+d.items.length+" 组候选线索（非真实抖音热度榜）";m.replaceChildren();let diag=document.getElementById("diagnostic");try{let z=await(await fetch("/api/status")).json();let t=z.collector;diag.textContent="采集状态："+t.state+" · 上次采集："+(t.last_run?new Date(t.last_run*1000).toLocaleString():"尚未完成")+" · 最近索引记录："+z.recent_index_records+" · 本次发现："+(t.last_result?.found??"未知")+" · 错误："+(t.last_error||t.last_result?.errors?.length||0)+" · 仅搜索索引，非抖音实时数据"+(z.database_ephemeral?" · 免费实例重启可能清空数据":"")}catch(e){diag.textContent="无法读取采集诊断："+e}for(let x of d.items){let a=document.createElement("article"),h=document.createElement("h3"),link=document.createElement("a"),info=document.createElement("small");link.href=x.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=x.title;h.append(link);info.textContent="索引/来源时间："+new Date(x.published*1000).toLocaleString()+" · 线索："+x.evidence_count+" · "+(x.drama_name||"剧名待核实")+" · 来源："+x.source;a.append(h,info);m.append(a)}}catch(e){s.textContent="数据加载失败："+e}}</script><script>load()</script>"""
+            page="""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>短剧热点监测</title><style>body{font-family:system-ui;background:#101827;color:#eaf0ff;max-width:900px;margin:40px auto;padding:18px}button{background:#4476ef;color:white;border:0;padding:12px;border-radius:8px}article{background:#1c2a40;margin:12px 0;padding:16px;border-radius:12px}a{color:#91b7ff}small{color:#bac5d9}</style><h1>短剧 / 漫剧热点监测</h1><p>公开搜索引擎索引发现 · 非抖音官方实时数据。缺少播放量、点赞等数据时不虚构。</p><button onclick="load()">刷新数据</button><p id="status">正在读取...</p><p id="diagnostic" style="color:#ffca79"></p><h2>原始采集线索（含未入榜原因）</h2><div id="raw"></div><main id="list"></main><script>async function load(){let s=document.getElementById("status"),m=document.getElementById("list");try{let d=await(await fetch("/api/hotspots?hours=72")).json();s.textContent="最近72小时 · "+d.items.length+" 组候选线索（非真实抖音热度榜）";m.replaceChildren();let diag=document.getElementById("diagnostic");try{let z=await(await fetch("/api/status")).json();let t=z.collector;diag.textContent="采集状态："+t.state+" · 上次采集："+(t.last_run?new Date(t.last_run*1000).toLocaleString():"尚未完成")+" · 最近索引记录："+z.recent_index_records+" · 本次发现："+(t.last_result?.found??"未知")+" · 错误："+(t.last_error||t.last_result?.errors?.length||0)+" · 仅搜索索引，非抖音实时数据"+(z.database_ephemeral?" · 免费实例重启可能清空数据":"")}catch(e){diag.textContent="无法读取采集诊断："+e}let raw=await(await fetch("/api/raw")).json();let box=document.getElementById("raw");box.replaceChildren();for(let x of raw.items){let a=document.createElement("article"),l=document.createElement("a"),reason=document.createElement("small");l.href=x.url;l.target="_blank";l.rel="noopener noreferrer";l.textContent=x.title;reason.textContent=" · "+(x.eligible?"已命中展示关键词":"未入榜："+x.excluded_reason)+" · "+new Date(x.published*1000).toLocaleString();a.append(l,reason);box.append(a)}if(!raw.items.length)box.textContent="近72小时无原始索引记录";for(let x of d.items){let a=document.createElement("article"),h=document.createElement("h3"),link=document.createElement("a"),info=document.createElement("small");link.href=x.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=x.title;h.append(link);info.textContent="索引/来源时间："+new Date(x.published*1000).toLocaleString()+" · 线索："+x.evidence_count+" · "+(x.drama_name||"剧名待核实")+" · 来源："+x.source;a.append(h,info);m.append(a)}}catch(e){s.textContent="数据加载失败："+e}}</script><script>load()</script>"""
             body=page.encode();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body);return
         if p.path=="/api/collect":
             return self.reply(403,{"error":"Manual collection endpoint disabled; background collection runs hourly while instance is awake"})
+        if p.path=="/api/raw":
+            return self.reply(200,{"items":raw_records(),"warning":"Unverified search-index leads, not Douyin popularity"})
         if p.path=="/api/status":
             with connect() as db:
                 total=db.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
